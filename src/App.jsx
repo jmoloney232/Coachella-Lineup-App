@@ -1,68 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-
-const DAY_ORDER = ["Friday", "Saturday", "Sunday"];
-const QUASAR_DAY_ORDER = ["Friday", "Saturday", "Sunday"];
-const DOLAB_ROW_PATTERNS = [2, 1, 4, 4, 2, 5, 4, 5, 4, 4, 4, 3, 5, 3, 4];
-const EXCLUDED_ARTISTS = new Set(["Anyma", "Josh Baker x Carlita", "DJ Snake"]);
-const MY_LIST_STORAGE_KEY = "coachella-personal-list";
-const DOLAB_WEEKEND_ONE_ARTISTS = new Set([
-  "1TBSP",
-  "ANDHIM",
-  "ANDY C",
-  "ANFISA LETYAGO",
-  "BAALTI",
-  "BABY J",
-  "BRUNELLO",
-  "BULLET TOOTH",
-  "CINCITY",
-  "DEER JADE",
-  "EFFIN",
-  "FIFI",
-  "JACKIE HOLLANDER",
-  "JIGITZ",
-  "LUMIA",
-  "MCR-T",
-  "OMAR+",
-  "OMNOM",
-  "POOLSIDE'S DAYTIME DISCO",
-  "RODDY LIMA",
-  "SORAYA",
-  "SOUL PURPOSE",
-  "STARJUNK 95",
-  "TINASHE (DJ SET)",
-  "WHETHAN",
-]);
-const DOLAB_WEEKEND_TWO_ARTISTS = new Set([
-  "ÆON:MODE B2B BLOSSOM",
-  "AFTER MIDNIGHT (MATRODA x SAN PACHO)",
-  "ALEX CHAPMAN B2B ZOE GITTER",
-  "ALISHA",
-  "APE DRUMS B2B BONTAN",
-  "ARTHI",
-  "THE BROTHERS MACKLOVITCH (A-TRAK & DAVE 1)",
-  "CHAMPION",
-  "CQUESTT",
-  "DJ HABIBEATS B2B ZEEMUFFIN",
-  "DRAMA DJ SET",
-  "ELIZA ROSE",
-  "GUDFELLA",
-  "JAZZY",
-  "LEVEL UP B2B MARY DROPPINZ",
-  "LYNY",
-  "MAXI MERAKI",
-  "NATASCHA POLKÉ",
-  "NEUMONIC",
-  "PATRICIO",
-  "SAM ALFRED",
-  "SAM BINGA B2B JIALING",
-  "SARZ",
-  "SBTRKT",
-  "SETH TROXLER",
-  "SILVA BUMPA",
-  "STRAWBRY",
-  "TOURIST",
-  "X CLUB.",
-]);
+import {
+  DAY_ORDER,
+  DOLAB_ROW_PATTERNS,
+  MY_LIST_STORAGE_KEY,
+  QUASAR_DAY_ORDER,
+  USER_ID_STORAGE_KEY,
+  normalizeLookupValue,
+} from "./lib/lineupData";
 
 const DAY_META = {
   Friday: { label: "FRIDAY APRIL 10 & 17" },
@@ -75,151 +19,6 @@ const ROW_PATTERNS = {
   Saturday: [1, 9, 10, 10, 13],
   Sunday: [1, 9, 10, 10, 11, 1],
 };
-
-function normalizeLookupValue(value = "") {
-  return value
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-}
-
-function parseCsv(text) {
-  const rows = [];
-  let current = "";
-  let row = [];
-  let inQuotes = false;
-
-  for (let index = 0; index < text.length; index += 1) {
-    const char = text[index];
-    const next = text[index + 1];
-
-    if (char === '"') {
-      if (inQuotes && next === '"') {
-        current += '"';
-        index += 1;
-      } else {
-        inQuotes = !inQuotes;
-      }
-      continue;
-    }
-
-    if (char === "," && !inQuotes) {
-      row.push(current);
-      current = "";
-      continue;
-    }
-
-    if ((char === "\n" || char === "\r") && !inQuotes) {
-      if (char === "\r" && next === "\n") {
-        index += 1;
-      }
-
-      row.push(current);
-      current = "";
-
-      if (row.some((cell) => cell.length > 0)) {
-        rows.push(row);
-      }
-
-      row = [];
-      continue;
-    }
-
-    current += char;
-  }
-
-  if (current.length > 0 || row.length > 0) {
-    row.push(current);
-    rows.push(row);
-  }
-
-  const [header, ...body] = rows;
-
-  return body.map((cells) =>
-    header.reduce((entry, key, index) => {
-      entry[key] = cells[index] ?? "";
-      return entry;
-    }, {}),
-  );
-}
-
-function splitSongs(value = "", delimiter = "|") {
-  return value
-    .split(delimiter)
-    .map((song) => song.trim())
-    .filter(Boolean);
-}
-
-function normalizeCoachellaArtist(artist, index) {
-  return {
-    id: `${artist.day}-${artist.artist}-${index}`.toLowerCase(),
-    festival: "coachella",
-    lineupRank: index,
-    ...artist,
-    songsList: splitSongs(artist.songs),
-    relatedArtistsList: splitSongs(artist.related_artists ?? "", ";"),
-    popularSongsList: splitSongs(artist.spotify_top5_tracks ?? ""),
-    imageUrl: artist.spotify_image_url ?? artist.image_url ?? "",
-  };
-}
-
-function normalizeDolabArtist(artist, index) {
-  const weekend = DOLAB_WEEKEND_ONE_ARTISTS.has(artist.artist)
-    ? "weekend1"
-    : DOLAB_WEEKEND_TWO_ARTISTS.has(artist.artist)
-      ? "weekend2"
-      : "";
-
-  return {
-    id: `dolab-${artist.artist}-${index}`.toLowerCase(),
-    festival: "dolab",
-    lineupRank: index,
-    weekend,
-    artist: artist.artist,
-    genre: artist.genre,
-    spotify_url: artist.spotify_url,
-    note: artist.artist_description,
-    popularSongsList: splitSongs(artist.spotify_top5_tracks ?? ""),
-  };
-}
-
-function normalizeQuasarArtist(artist, index) {
-  const weekend = artist.note.includes("Weekend 2") ? "weekend2" : "weekend1";
-
-  return {
-    id: `quasar-${weekend}-${artist.day}-${artist.artist}-${index}`.toLowerCase(),
-    festival: "quasar",
-    lineupRank: index,
-    artist: artist.artist,
-    day: artist.day,
-    weekend,
-    genre: artist.genre,
-    spotify_url: artist.spotify_url,
-    note: artist.artist_description || artist.note,
-    imageUrl: artist.spotify_image_url ?? "",
-    popularSongsList: splitSongs(artist.spotify_top5_tracks ?? ""),
-  };
-}
-
-function sanitizeCoachellaArtists(artists) {
-  const seenArtists = new Set();
-
-  return artists.filter((artist) => {
-    if (EXCLUDED_ARTISTS.has(artist.artist)) {
-      return false;
-    }
-
-    const normalizedArtist = normalizeLookupValue(artist.artist);
-    if (seenArtists.has(normalizedArtist)) {
-      return false;
-    }
-
-    seenArtists.add(normalizedArtist);
-    return true;
-  });
-}
 
 function buildRows(artists, pattern) {
   const rows = [];
@@ -286,6 +85,57 @@ function SaveActionButton({ isSaved, onToggleSave }) {
     <button className={`saveArtistButton ${isSaved ? "active" : ""}`} type="button" onClick={onToggleSave}>
       {isSaved ? "Remove from My List" : "Add to My List"}
     </button>
+  );
+}
+
+function AuthMenu({
+  authUser,
+  authEmail,
+  authPassword,
+  authPending,
+  authMenuOpen,
+  onToggleMenu,
+  onEmailChange,
+  onPasswordChange,
+  onSubmit,
+  onLogout,
+}) {
+  return (
+    <div className="authMenu">
+      {authUser ? (
+        <button className="authSecondaryButton compact" type="button" onClick={onLogout} disabled={authPending}>
+          {authPending ? "Signing Out..." : "Sign Out"}
+        </button>
+      ) : (
+        <>
+          <button className="authSecondaryButton compact" type="button" onClick={onToggleMenu} disabled={authPending}>
+            Sign In
+          </button>
+          {authMenuOpen ? (
+            <form className="authPopover" onSubmit={onSubmit}>
+              <label className="authField">
+                <span>Email</span>
+                <input type="email" value={authEmail} onChange={(event) => onEmailChange(event.target.value)} autoComplete="email" required />
+              </label>
+              <label className="authField">
+                <span>Password</span>
+                <input
+                  type="password"
+                  value={authPassword}
+                  onChange={(event) => onPasswordChange(event.target.value)}
+                  autoComplete="current-password"
+                  minLength={8}
+                  required
+                />
+              </label>
+              <button className="authPrimaryButton compact" type="submit" disabled={authPending}>
+                {authPending ? "Signing In..." : "Sign In"}
+              </button>
+            </form>
+          ) : null}
+        </>
+      )}
+    </div>
   );
 }
 
@@ -888,6 +738,35 @@ function getInitialPage() {
   return "coachella";
 }
 
+function getOrCreateGuestUserId() {
+  try {
+    const existing = window.localStorage.getItem(USER_ID_STORAGE_KEY);
+    if (existing && existing.startsWith("guest_")) {
+      return existing;
+    }
+
+    const nextId = `guest_${Math.random().toString(36).slice(2, 12)}`;
+    window.localStorage.setItem(USER_ID_STORAGE_KEY, nextId);
+    return nextId;
+  } catch {
+    return `guest_${Math.random().toString(36).slice(2, 12)}`;
+  }
+}
+
+async function requestJson(url, options = {}) {
+  const response = await fetch(url, {
+    credentials: "same-origin",
+    ...options,
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.error || "Request failed.");
+  }
+
+  return payload;
+}
+
 export default function App() {
   const [activePage, setActivePage] = useState(getInitialPage);
   const [coachellaArtists, setCoachellaArtists] = useState([]);
@@ -898,6 +777,12 @@ export default function App() {
   const [selectedQuasarArtistId, setSelectedQuasarArtistId] = useState("");
   const [selectedMyListArtistId, setSelectedMyListArtistId] = useState("");
   const [activeQuasarWeekend, setActiveQuasarWeekend] = useState("weekend1");
+  const [guestUserId] = useState(getOrCreateGuestUserId);
+  const [authUser, setAuthUser] = useState(null);
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authPending, setAuthPending] = useState(false);
+  const [authMenuOpen, setAuthMenuOpen] = useState(false);
   const [savedArtistIds, setSavedArtistIds] = useState(() => {
     try {
       const stored = window.localStorage.getItem(MY_LIST_STORAGE_KEY);
@@ -927,35 +812,45 @@ export default function App() {
 
     async function loadData() {
       try {
-        const [coachellaResponse, dolabResponse, quasarResponse] = await Promise.all([
-          fetch("/coachella-2026-data.csv"),
-          fetch("/dolab-2026-data.csv"),
-          fetch("/quasar-2026-data.csv"),
-        ]);
-
-        if (!coachellaResponse.ok || !dolabResponse.ok || !quasarResponse.ok) {
-          throw new Error("Failed to load lineup data.");
-        }
-
-        const [coachellaText, dolabText, quasarText] = await Promise.all([
-          coachellaResponse.text(),
-          dolabResponse.text(),
-          quasarResponse.text(),
-        ]);
-
-        const nextCoachellaArtists = sanitizeCoachellaArtists(
-          parseCsv(coachellaText)
-            .filter((entry) => DAY_ORDER.includes(entry.day))
-            .map(normalizeCoachellaArtist),
+        const [payload, authPayload] = await Promise.all([requestJson("/api/lineups"), requestJson("/api/auth/me")]);
+        const nextCoachellaArtists = Array.isArray(payload.coachella) ? payload.coachella : [];
+        const nextDolabArtists = Array.isArray(payload.dolab) ? payload.dolab : [];
+        const nextQuasarArtists = Array.isArray(payload.quasar) ? payload.quasar : [];
+        const nextAuthUser = authPayload.user ?? null;
+        const myListPayload = await requestJson(
+          nextAuthUser ? "/api/my-list" : `/api/my-list?userId=${encodeURIComponent(guestUserId)}`,
         );
-        const nextDolabArtists = parseCsv(dolabText).map(normalizeDolabArtist);
-        const nextQuasarArtists = parseCsv(quasarText).map(normalizeQuasarArtist);
+        const nextSavedArtistIds = Array.isArray(myListPayload.artistIds) ? myListPayload.artistIds : [];
+        const localSavedArtistIds = (() => {
+          try {
+            const stored = window.localStorage.getItem(MY_LIST_STORAGE_KEY);
+            return stored ? JSON.parse(stored) : [];
+          } catch {
+            return [];
+          }
+        })();
 
         if (!active) return;
 
         setCoachellaArtists(nextCoachellaArtists);
         setDolabArtists(nextDolabArtists);
         setQuasarArtists(nextQuasarArtists);
+        setAuthUser(nextAuthUser);
+        setSavedArtistIds(nextSavedArtistIds);
+
+        if (!nextAuthUser && nextSavedArtistIds.length === 0 && Array.isArray(localSavedArtistIds) && localSavedArtistIds.length > 0) {
+          const migratedPayload = await requestJson(`/api/my-list?userId=${encodeURIComponent(guestUserId)}`, {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ artistIds: localSavedArtistIds }),
+          });
+
+          if (active) {
+            setSavedArtistIds(Array.isArray(migratedPayload.artistIds) ? migratedPayload.artistIds : []);
+          }
+        }
       } catch (loadError) {
         if (!active) return;
         setError(loadError instanceof Error ? loadError.message : "Unable to load lineup data.");
@@ -968,7 +863,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [guestUserId]);
 
   function handleSelectArtist(setter) {
     return (artistId, allowToggle = true) => {
@@ -987,16 +882,80 @@ export default function App() {
     };
   }
 
-  function handleToggleSavedArtist(artistId) {
-    setSavedArtistIds((current) => (current.includes(artistId) ? current.filter((id) => id !== artistId) : [...current, artistId]));
+  async function handleToggleSavedArtist(artistId) {
+    const currentArtistIds = savedArtistIds;
+    const nextArtistIds = currentArtistIds.includes(artistId)
+      ? currentArtistIds.filter((id) => id !== artistId)
+      : [...currentArtistIds, artistId];
+
+    setSavedArtistIds(nextArtistIds);
+
+    try {
+      setError("");
+      const payload = await requestJson(authUser ? "/api/my-list" : `/api/my-list?userId=${encodeURIComponent(guestUserId)}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ artistIds: nextArtistIds }),
+      });
+      setSavedArtistIds(Array.isArray(payload.artistIds) ? payload.artistIds : []);
+    } catch (saveError) {
+      setSavedArtistIds(currentArtistIds);
+      setError(saveError instanceof Error ? saveError.message : "Unable to save your list.");
+    }
+  }
+
+  async function handleAuthSubmit(event) {
+    event.preventDefault();
+    setAuthPending(true);
+    setError("");
+
+    try {
+      const payload = await requestJson("/api/auth/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email: authEmail,
+          password: authPassword,
+          guestUserId,
+        }),
+      });
+
+      setAuthUser(payload.user ?? null);
+      setAuthPassword("");
+      setAuthMenuOpen(false);
+      const myListPayload = await requestJson("/api/my-list");
+      setSavedArtistIds(Array.isArray(myListPayload.artistIds) ? myListPayload.artistIds : []);
+    } catch (authError) {
+      setError(authError instanceof Error ? authError.message : "Unable to authenticate.");
+    } finally {
+      setAuthPending(false);
+    }
+  }
+
+  async function handleLogout() {
+    setAuthPending(true);
+    setError("");
+
+    try {
+      await requestJson("/api/auth/logout", { method: "POST" });
+      setAuthUser(null);
+      setAuthPassword("");
+      setAuthMenuOpen(false);
+      const guestListPayload = await requestJson(`/api/my-list?userId=${encodeURIComponent(guestUserId)}`);
+      setSavedArtistIds(Array.isArray(guestListPayload.artistIds) ? guestListPayload.artistIds : []);
+    } catch (logoutError) {
+      setError(logoutError instanceof Error ? logoutError.message : "Unable to log out.");
+    } finally {
+      setAuthPending(false);
+    }
   }
 
   if (loading) {
     return <div className="statusScreen">Loading lineup poster…</div>;
-  }
-
-  if (error) {
-    return <div className="statusScreen">Error: {error}</div>;
   }
 
   return (
@@ -1027,7 +986,20 @@ export default function App() {
         }}>
           My List
         </button>
+        <AuthMenu
+          authUser={authUser}
+          authEmail={authEmail}
+          authPassword={authPassword}
+          authPending={authPending}
+          authMenuOpen={authMenuOpen}
+          onToggleMenu={() => setAuthMenuOpen((current) => !current)}
+          onEmailChange={setAuthEmail}
+          onPasswordChange={setAuthPassword}
+          onSubmit={handleAuthSubmit}
+          onLogout={handleLogout}
+        />
       </nav>
+      {error ? <div className="errorBanner">{error}</div> : null}
 
       {activePage === "dolab" ? (
         <DoLabPage

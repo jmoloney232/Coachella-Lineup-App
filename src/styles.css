@@ -60,6 +60,7 @@ a {
   z-index: 40;
   display: flex;
   justify-content: center;
+  align-items: flex-start;
   gap: 10px;
   padding: 14px 16px 0;
 }
@@ -75,12 +76,116 @@ a {
   font-weight: 800;
   cursor: pointer;
   backdrop-filter: blur(10px);
+  transition: border-color 160ms ease, background 160ms ease, color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.siteNavButton:hover,
+.siteNavButton:focus-visible {
+  border-color: rgba(255, 205, 117, 0.4);
+  color: var(--accent-cream);
+  background: rgba(23, 50, 58, 0.72);
+  box-shadow: 0 0 0 1px rgba(255, 205, 117, 0.16), 0 10px 24px rgba(0, 0, 0, 0.18);
+  transform: translateY(-1px);
+  outline: none;
 }
 
 .siteNavButton.active {
-  border-color: rgba(255, 205, 117, 0.55);
+  border-color: rgba(255, 205, 117, 0.82);
+  color: #fffdf4;
+  background: linear-gradient(180deg, rgba(47, 83, 88, 0.95), rgba(23, 50, 58, 0.95));
+  box-shadow: 0 0 0 1px rgba(255, 205, 117, 0.22), 0 12px 28px rgba(0, 0, 0, 0.26);
+  transform: translateY(-1px);
+}
+
+.authMenu {
+  position: relative;
+  margin-left: auto;
+}
+
+.authModeButton,
+.authPrimaryButton,
+.authSecondaryButton {
+  padding: 10px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(243, 233, 213, 0.86);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.72rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.authSecondaryButton.compact,
+.authPrimaryButton.compact {
+  padding: 9px 12px;
+  white-space: nowrap;
+}
+
+.authModeButton.active,
+.authPrimaryButton,
+.authSecondaryButton:hover,
+.authSecondaryButton:focus-visible {
+  border-color: rgba(255, 205, 117, 0.52);
+  background: rgba(255, 205, 117, 0.12);
   color: var(--accent-cream);
-  background: rgba(18, 40, 46, 0.75);
+}
+
+.authPopover {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 45;
+  width: min(280px, calc(100vw - 32px));
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(5, 14, 17, 0.94);
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(12px);
+}
+
+.authField {
+  display: grid;
+  gap: 6px;
+}
+
+.authField span {
+  color: rgba(243, 233, 213, 0.7);
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.authField input {
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(4, 10, 12, 0.88);
+  color: var(--text-main);
+  font: inherit;
+}
+
+.authDescription {
+  margin-top: 10px;
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  letter-spacing: 0.06em;
+  line-height: 1.4;
+}
+
+.errorBanner {
+  position: relative;
+  z-index: 30;
+  max-width: 1160px;
+  margin: 12px auto 0;
+  padding: 12px 16px;
+  border: 1px solid rgba(255, 116, 66, 0.35);
+  background: rgba(72, 18, 8, 0.55);
+  color: #ffd7c8;
+  font-size: 0.86rem;
+  letter-spacing: 0.06em;
 }
 
 .posterShell {
@@ -245,8 +350,9 @@ a {
 .artistButton:hover,
 .artistButton:focus-visible,
 .artistButton.active {
-  color: var(--accent-gold);
-  transform: translateY(-1px);
+  color: #fff6d7;
+  text-shadow: 0 0 14px rgba(255, 213, 120, 0.45);
+  transform: translateY(-1px) scale(1.01);
   outline: none;
 }
 
@@ -665,8 +771,9 @@ a {
 .dolabArtistButton:hover,
 .dolabArtistButton:focus-visible,
 .dolabArtistButton.active {
-  transform: translateY(-1px);
-  filter: brightness(1.15);
+  transform: translateY(-1px) scale(1.015);
+  filter: brightness(1.28) saturate(1.15);
+  text-shadow: 0 0 16px rgba(255, 255, 255, 0.22);
   outline: none;
 }
 
@@ -871,8 +978,9 @@ a {
 .quasarArtistButton:hover,
 .quasarArtistButton:focus-visible,
 .quasarArtistButton.active {
-  transform: translateY(-1px);
-  opacity: 0.9;
+  transform: translateY(-1px) scale(1.01);
+  opacity: 1;
+  text-shadow: 0 0 18px rgba(255, 243, 218, 0.28);
   outline: none;
 }
 
@@ -1027,10 +1135,34 @@ a {
 @media (max-width: 820px) {
   .siteNav {
     justify-content: stretch;
+    flex-wrap: wrap;
   }
 
   .siteNavButton {
     flex: 1;
+  }
+
+  .authMenu {
+    width: 100%;
+    display: flex;
+    justify-content: flex-end;
+  }
+
+  .authPanel {
+    margin-top: 10px;
+    padding: 16px;
+  }
+
+  .authPanelHeader,
+  .authModeSwitch,
+  .authSessionMeta,
+  .authForm {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .authSessionMeta {
+    justify-content: start;
   }
 
   .posterShell {
