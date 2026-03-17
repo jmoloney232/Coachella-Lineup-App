@@ -1,7 +1,8 @@
 import { createHash, randomBytes, randomUUID, scrypt as scryptCallback } from "node:crypto";
 import { createServer } from "node:http";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
+import { Pool } from "pg";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { buildLineupData, normalizeLookupValue } from "./src/lib/lineupData.js";
@@ -16,6 +17,9 @@ const authFile = path.join(dataDir, "auth.json");
 const PORT = Number(process.env.PORT ?? 3001);
 const SESSION_COOKIE_NAME = "coachella_session";
 const SESSION_DURATION_MS = 1000 * 60 * 60 * 24 * 30;
+const SESSION_CLEANUP_INTERVAL_MS = 1000 * 60 * 15;
+const AUTH_RATE_LIMIT_WINDOW_MS = Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS ?? 1000 * 60 * 15);
+const AUTH_RATE_LIMIT_MAX_REQUESTS = Number(process.env.AUTH_RATE_LIMIT_MAX_REQUESTS ?? 10);
 
 const csvFiles = {
   coachella: path.join(publicDir, "coachella-2026-data.csv"),
@@ -25,17 +29,177 @@ const csvFiles = {
 
 let cachedData = null;
 let cachedSignature = "";
-let savedListsCache = null;
-let authCache = null;
+let pool = null;
+let bootstrapPromise = null;
+const authRateLimitStore = new Map();
 
-async function ensureJsonFile(filePath, fallback) {
-  await mkdir(dataDir, { recursive: true });
+function loadEnvFile() {
+  const envPath = path.join(__dirname, ".env");
+
+  return readFile(envPath, "utf8")
+    .then((content) => {
+      content.split(/\r?\n/).forEach((line) => {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith("#")) {
+          return;
+        }
+
+        const separatorIndex = trimmed.indexOf("=");
+        if (separatorIndex === -1) {
+          return;
+        }
+
+        const key = trimmed.slice(0, separatorIndex).trim();
+        const rawValue = trimmed.slice(separatorIndex + 1).trim();
+        const value = rawValue.replace(/^['"]|['"]$/g, "");
+
+        if (key && !(key in process.env)) {
+          process.env[key] = value;
+        }
+      });
+    })
+    .catch(() => {});
+}
+
+await loadEnvFile();
+
+function getDatabaseUrl() {
+  return process.env.DATABASE_URL ?? "";
+}
+
+function isProduction() {
+  return process.env.NODE_ENV === "production";
+}
+
+function getPool() {
+  if (pool) {
+    return pool;
+  }
+
+  const connectionString = getDatabaseUrl();
+  if (!connectionString) {
+    throw new Error("DATABASE_URL is required. Copy .env.example to .env and paste your Neon connection string.");
+  }
+
+  pool = new Pool({
+    connectionString,
+    ssl: {
+      rejectUnauthorized: false,
+    },
+  });
+
+  return pool;
+}
+
+async function query(text, params = []) {
+  return getPool().query(text, params);
+}
+
+async function initializeDatabase() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      email TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      password_salt TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS sessions (
+      token_hash TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      expires_at TIMESTAMPTZ NOT NULL
+    );
+  `);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS saved_lists (
+      owner_id TEXT PRIMARY KEY,
+      artist_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+}
+
+async function maybeMigrateLocalJsonData() {
+  const migrationEnabled = process.env.AUTO_MIGRATE_LOCAL_JSON !== "false";
+  if (!migrationEnabled) {
+    return;
+  }
 
   try {
-    await stat(filePath);
-  } catch {
-    await writeFile(filePath, JSON.stringify(fallback, null, 2));
+    const authExists = await stat(authFile).then(() => true).catch(() => false);
+    if (authExists) {
+      const content = await readFile(authFile, "utf8");
+      const authStore = JSON.parse(content || "{}");
+
+      if (Array.isArray(authStore.users)) {
+        for (const user of authStore.users) {
+          await query(
+            `
+              INSERT INTO users (id, email, password_hash, password_salt, created_at)
+              VALUES ($1, $2, $3, $4, $5)
+              ON CONFLICT (id) DO UPDATE SET
+                email = EXCLUDED.email,
+                password_hash = EXCLUDED.password_hash,
+                password_salt = EXCLUDED.password_salt;
+            `,
+            [user.id, user.email, user.passwordHash, user.passwordSalt, user.createdAt ?? new Date().toISOString()],
+          );
+        }
+      }
+
+      if (authStore.sessions && typeof authStore.sessions === "object") {
+        for (const [tokenHash, session] of Object.entries(authStore.sessions)) {
+          await query(
+            `
+              INSERT INTO sessions (token_hash, user_id, created_at, expires_at)
+              VALUES ($1, $2, $3, TO_TIMESTAMP($4 / 1000.0))
+              ON CONFLICT (token_hash) DO NOTHING;
+            `,
+            [tokenHash, session.userId, session.createdAt ?? new Date().toISOString(), session.expiresAt],
+          );
+        }
+      }
+    }
+
+    const savedListsExist = await stat(savedListsFile).then(() => true).catch(() => false);
+    if (savedListsExist) {
+      const content = await readFile(savedListsFile, "utf8");
+      const savedListsStore = JSON.parse(content || "{}");
+      const users = savedListsStore.users && typeof savedListsStore.users === "object" ? savedListsStore.users : {};
+
+      for (const [ownerId, savedList] of Object.entries(users)) {
+        const artistIds = Array.isArray(savedList.artistIds) ? savedList.artistIds : [];
+        await query(
+          `
+            INSERT INTO saved_lists (owner_id, artist_ids, updated_at)
+            VALUES ($1, $2::jsonb, $3)
+            ON CONFLICT (owner_id) DO UPDATE SET
+              artist_ids = EXCLUDED.artist_ids,
+              updated_at = EXCLUDED.updated_at;
+          `,
+          [ownerId, JSON.stringify(artistIds), savedList.updatedAt ?? new Date().toISOString()],
+        );
+      }
+    }
+  } catch (error) {
+    console.error("Local JSON migration skipped:", error instanceof Error ? error.message : error);
   }
+}
+
+async function bootstrapDatabase() {
+  if (!bootstrapPromise) {
+    bootstrapPromise = (async () => {
+      await initializeDatabase();
+      await maybeMigrateLocalJsonData();
+    })();
+  }
+
+  await bootstrapPromise;
 }
 
 async function loadLineupData() {
@@ -115,11 +279,27 @@ function buildSessionCookie(value, expiresAt) {
     `Expires=${new Date(expiresAt).toUTCString()}`,
   ];
 
+  if (isProduction()) {
+    parts.push("Secure");
+  }
+
   return parts.join("; ");
 }
 
 function clearSessionCookie() {
-  return `${SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Expires=${new Date(0).toUTCString()}`;
+  const parts = [
+    `${SESSION_COOKIE_NAME}=`,
+    "Path=/",
+    "HttpOnly",
+    "SameSite=Lax",
+    `Expires=${new Date(0).toUTCString()}`,
+  ];
+
+  if (isProduction()) {
+    parts.push("Secure");
+  }
+
+  return parts.join("; ");
 }
 
 function normalizeEmail(email = "") {
@@ -152,40 +332,30 @@ async function verifyPassword(password, salt, expectedHash) {
   return actualHash === expectedHash;
 }
 
-async function loadSavedLists() {
-  if (savedListsCache) {
-    return savedListsCache;
+async function getSavedArtistIds(ownerId) {
+  const result = await query("SELECT artist_ids FROM saved_lists WHERE owner_id = $1;", [ownerId]);
+  if (result.rowCount === 0) {
+    return [];
   }
 
-  await ensureJsonFile(savedListsFile, { users: {} });
-  const content = await readFile(savedListsFile, "utf8");
-  const parsed = JSON.parse(content || "{}");
-  savedListsCache = {
-    users: parsed.users && typeof parsed.users === "object" ? parsed.users : {},
-  };
-  return savedListsCache;
-}
-
-async function saveSavedLists(store) {
-  savedListsCache = store;
-  await ensureJsonFile(savedListsFile, { users: {} });
-  await writeFile(savedListsFile, JSON.stringify(store, null, 2));
-}
-
-async function getSavedArtistIds(ownerId) {
-  const store = await loadSavedLists();
-  const artistIds = store.users[ownerId]?.artistIds;
+  const artistIds = result.rows[0].artist_ids;
   return Array.isArray(artistIds) ? artistIds : [];
 }
 
 async function updateSavedArtistIds(ownerId, artistIds) {
   const nextArtistIds = Array.from(new Set(artistIds.filter((value) => typeof value === "string" && value.length > 0)));
-  const store = await loadSavedLists();
-  store.users[ownerId] = {
-    artistIds: nextArtistIds,
-    updatedAt: new Date().toISOString(),
-  };
-  await saveSavedLists(store);
+
+  await query(
+    `
+      INSERT INTO saved_lists (owner_id, artist_ids, updated_at)
+      VALUES ($1, $2::jsonb, NOW())
+      ON CONFLICT (owner_id) DO UPDATE SET
+        artist_ids = EXCLUDED.artist_ids,
+        updated_at = NOW();
+    `,
+    [ownerId, JSON.stringify(nextArtistIds)],
+  );
+
   return nextArtistIds;
 }
 
@@ -200,37 +370,15 @@ async function mergeSavedArtistIds(fromOwnerId, toOwnerId) {
   return mergedIds;
 }
 
-async function loadAuthStore() {
-  if (authCache) {
-    return authCache;
-  }
-
-  await ensureJsonFile(authFile, { users: [], sessions: {} });
-  const content = await readFile(authFile, "utf8");
-  const parsed = JSON.parse(content || "{}");
-  authCache = {
-    users: Array.isArray(parsed.users) ? parsed.users : [],
-    sessions: parsed.sessions && typeof parsed.sessions === "object" ? parsed.sessions : {},
-  };
-  return authCache;
-}
-
-async function saveAuthStore(store) {
-  authCache = store;
-  await ensureJsonFile(authFile, { users: [], sessions: {} });
-  await writeFile(authFile, JSON.stringify(store, null, 2));
-}
-
 function publicUser(user) {
   return {
     id: user.id,
     email: user.email,
-    createdAt: user.createdAt,
+    createdAt: user.created_at,
   };
 }
 
 async function createUser(email, password) {
-  const authStore = await loadAuthStore();
   const normalizedEmail = normalizeEmail(email);
 
   if (!normalizedEmail || !normalizedEmail.includes("@")) {
@@ -241,8 +389,8 @@ async function createUser(email, password) {
     throw new Error("Password must be at least 8 characters.");
   }
 
-  const existingUser = authStore.users.find((user) => user.email === normalizedEmail);
-  if (existingUser) {
+  const existingUser = await query("SELECT id FROM users WHERE email = $1;", [normalizedEmail]);
+  if (existingUser.rowCount > 0) {
     throw new Error("An account with that email already exists.");
   }
 
@@ -252,24 +400,30 @@ async function createUser(email, password) {
     email: normalizedEmail,
     passwordHash: passwordRecord.hash,
     passwordSalt: passwordRecord.salt,
-    createdAt: new Date().toISOString(),
   };
 
-  authStore.users.push(user);
-  await saveAuthStore(authStore);
-  return user;
+  const result = await query(
+    `
+      INSERT INTO users (id, email, password_hash, password_salt)
+      VALUES ($1, $2, $3, $4)
+      RETURNING id, email, created_at;
+    `,
+    [user.id, user.email, user.passwordHash, user.passwordSalt],
+  );
+
+  return result.rows[0];
 }
 
 async function authenticateUser(email, password) {
-  const authStore = await loadAuthStore();
   const normalizedEmail = normalizeEmail(email);
-  const user = authStore.users.find((entry) => entry.email === normalizedEmail);
+  const result = await query("SELECT * FROM users WHERE email = $1 LIMIT 1;", [normalizedEmail]);
+  const user = result.rows[0];
 
   if (!user) {
     throw new Error("Invalid email or password.");
   }
 
-  const isValid = await verifyPassword(password, user.passwordSalt, user.passwordHash);
+  const isValid = await verifyPassword(password, user.password_salt, user.password_hash);
   if (!isValid) {
     throw new Error("Invalid email or password.");
   }
@@ -278,18 +432,18 @@ async function authenticateUser(email, password) {
 }
 
 async function createSession(userId) {
-  const authStore = await loadAuthStore();
   const sessionToken = randomBytes(32).toString("hex");
   const tokenHash = hashToken(sessionToken);
   const expiresAt = Date.now() + SESSION_DURATION_MS;
 
-  authStore.sessions[tokenHash] = {
-    userId,
-    createdAt: new Date().toISOString(),
-    expiresAt,
-  };
+  await query(
+    `
+      INSERT INTO sessions (token_hash, user_id, expires_at)
+      VALUES ($1, $2, TO_TIMESTAMP($3 / 1000.0));
+    `,
+    [tokenHash, userId, expiresAt],
+  );
 
-  await saveAuthStore(authStore);
   return {
     sessionToken,
     expiresAt,
@@ -301,12 +455,11 @@ async function deleteSession(sessionToken) {
     return;
   }
 
-  const authStore = await loadAuthStore();
-  const tokenHash = hashToken(sessionToken);
-  if (authStore.sessions[tokenHash]) {
-    delete authStore.sessions[tokenHash];
-    await saveAuthStore(authStore);
-  }
+  await query("DELETE FROM sessions WHERE token_hash = $1;", [hashToken(sessionToken)]);
+}
+
+async function deleteExpiredSessions() {
+  await query("DELETE FROM sessions WHERE expires_at <= NOW();");
 }
 
 async function getAuthenticatedUser(request) {
@@ -316,28 +469,72 @@ async function getAuthenticatedUser(request) {
     return null;
   }
 
-  const authStore = await loadAuthStore();
-  const tokenHash = hashToken(sessionToken);
-  const session = authStore.sessions[tokenHash];
+  const result = await query(
+    `
+      SELECT users.id, users.email, users.created_at, sessions.expires_at
+      FROM sessions
+      INNER JOIN users ON users.id = sessions.user_id
+      WHERE sessions.token_hash = $1
+      LIMIT 1;
+    `,
+    [hashToken(sessionToken)],
+  );
 
-  if (!session) {
+  const row = result.rows[0];
+  if (!row) {
     return null;
   }
 
-  if (Date.now() > session.expiresAt) {
-    delete authStore.sessions[tokenHash];
-    await saveAuthStore(authStore);
+  if (Date.now() > new Date(row.expires_at).getTime()) {
+    await deleteSession(sessionToken);
     return null;
   }
 
-  const user = authStore.users.find((entry) => entry.id === session.userId);
-  if (!user) {
-    delete authStore.sessions[tokenHash];
-    await saveAuthStore(authStore);
+  return row;
+}
+
+function getClientIp(request) {
+  const forwardedFor = request.headers["x-forwarded-for"];
+  if (typeof forwardedFor === "string" && forwardedFor.trim()) {
+    return forwardedFor.split(",")[0].trim();
+  }
+
+  return request.socket.remoteAddress ?? "unknown";
+}
+
+function pruneRateLimitStore(now = Date.now()) {
+  for (const [key, entry] of authRateLimitStore.entries()) {
+    if (entry.resetAt <= now) {
+      authRateLimitStore.delete(key);
+    }
+  }
+}
+
+function consumeAuthRateLimit(request, routeKey) {
+  const now = Date.now();
+  pruneRateLimitStore(now);
+
+  const clientKey = `${routeKey}:${getClientIp(request)}`;
+  const existingEntry = authRateLimitStore.get(clientKey);
+
+  if (!existingEntry || existingEntry.resetAt <= now) {
+    authRateLimitStore.set(clientKey, {
+      count: 1,
+      resetAt: now + AUTH_RATE_LIMIT_WINDOW_MS,
+    });
     return null;
   }
 
-  return user;
+  existingEntry.count += 1;
+  authRateLimitStore.set(clientKey, existingEntry);
+
+  if (existingEntry.count > AUTH_RATE_LIMIT_MAX_REQUESTS) {
+    return {
+      retryAfterSeconds: Math.max(1, Math.ceil((existingEntry.resetAt - now) / 1000)),
+    };
+  }
+
+  return null;
 }
 
 function filterArtists(artists, searchParams) {
@@ -405,6 +602,8 @@ const server = createServer(async (request, response) => {
   }
 
   try {
+    await bootstrapDatabase();
+
     const url = new URL(request.url, `http://${request.headers.host ?? "localhost"}`);
     const data = await loadLineupData();
     const authenticatedUser = await getAuthenticatedUser(request);
@@ -414,6 +613,16 @@ const server = createServer(async (request, response) => {
         ok: true,
         festivals: ["coachella", "dolab", "quasar"],
         artistCount: data.artists.length,
+        database: "neon",
+      });
+      return;
+    }
+
+    if (url.pathname === "/api/db-test") {
+      const result = await query("SELECT NOW() AS current_time;");
+      sendJson(response, 200, {
+        ok: true,
+        current_time: result.rows[0]?.current_time ?? null,
       });
       return;
     }
@@ -426,6 +635,17 @@ const server = createServer(async (request, response) => {
     }
 
     if (url.pathname === "/api/auth/signup" && request.method === "POST") {
+      const rateLimit = consumeAuthRateLimit(request, "signup");
+      if (rateLimit) {
+        sendJson(
+          response,
+          429,
+          { error: "Too many signup attempts. Please try again later." },
+          { "Retry-After": String(rateLimit.retryAfterSeconds) },
+        );
+        return;
+      }
+
       const body = await readJsonBody(request);
       const user = await createUser(body.email ?? "", body.password ?? "");
       const session = await createSession(user.id);
@@ -449,6 +669,17 @@ const server = createServer(async (request, response) => {
     }
 
     if (url.pathname === "/api/auth/login" && request.method === "POST") {
+      const rateLimit = consumeAuthRateLimit(request, "login");
+      if (rateLimit) {
+        sendJson(
+          response,
+          429,
+          { error: "Too many login attempts. Please try again later." },
+          { "Retry-After": String(rateLimit.retryAfterSeconds) },
+        );
+        return;
+      }
+
       const body = await readJsonBody(request);
       const user = await authenticateUser(body.email ?? "", body.password ?? "");
       const session = await createSession(user.id);
@@ -581,6 +812,15 @@ const server = createServer(async (request, response) => {
     });
   }
 });
+
+await bootstrapDatabase();
+await deleteExpiredSessions();
+
+setInterval(() => {
+  deleteExpiredSessions().catch((error) => {
+    console.error("Session cleanup failed:", error instanceof Error ? error.message : error);
+  });
+}, SESSION_CLEANUP_INTERVAL_MS);
 
 server.listen(PORT, () => {
   console.log(`Coachella backend listening on http://localhost:${PORT}`);
