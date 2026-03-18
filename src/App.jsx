@@ -8,6 +8,8 @@ import {
   normalizeLookupValue,
 } from "./lib/lineupData";
 
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
+
 const DAY_META = {
   Friday: { label: "FRIDAY APRIL 10 & 17" },
   Saturday: { label: "SATURDAY APRIL 11 & 18" },
@@ -754,8 +756,9 @@ function getOrCreateGuestUserId() {
 }
 
 async function requestJson(url, options = {}) {
-  const response = await fetch(url, {
-    credentials: "same-origin",
+  const requestUrl = url.startsWith("http://") || url.startsWith("https://") ? url : `${API_BASE_URL}${url}`;
+  const response = await fetch(requestUrl, {
+    credentials: "include",
     ...options,
   });
 

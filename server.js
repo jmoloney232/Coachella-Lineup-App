@@ -20,6 +20,10 @@ const SESSION_DURATION_MS = 1000 * 60 * 60 * 24 * 30;
 const SESSION_CLEANUP_INTERVAL_MS = 1000 * 60 * 15;
 const AUTH_RATE_LIMIT_WINDOW_MS = Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS ?? 1000 * 60 * 15);
 const AUTH_RATE_LIMIT_MAX_REQUESTS = Number(process.env.AUTH_RATE_LIMIT_MAX_REQUESTS ?? 10);
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ?? "http://localhost:5173,http://127.0.0.1:5173")
+  .split(",")
+  .map((value) => value.trim())
+  .filter(Boolean);
 
 const csvFiles = {
   coachella: path.join(publicDir, "coachella-2026-data.csv"),
@@ -69,6 +73,14 @@ function getDatabaseUrl() {
 
 function isProduction() {
   return process.env.NODE_ENV === "production";
+}
+
+function getAllowedOrigin(request) {
+  const origin = request.headers.origin;
+  if (typeof origin === "string" && ALLOWED_ORIGINS.includes(origin)) {
+    return origin;
+  }
+  return null;
 }
 
 function getPool() {
@@ -224,9 +236,16 @@ async function loadLineupData() {
   return cachedData;
 }
 
-function sendJson(response, statusCode, payload, headers = {}) {
+function sendJson(request, response, statusCode, payload, headers = {}) {
+  const allowedOrigin = getAllowedOrigin(request);
   response.writeHead(statusCode, {
-    "Access-Control-Allow-Origin": "*",
+    ...(allowedOrigin
+      ? {
+          "Access-Control-Allow-Origin": allowedOrigin,
+          "Access-Control-Allow-Credentials": "true",
+          Vary: "Origin",
+        }
+      : {}),
     "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
     "Content-Type": "application/json; charset=utf-8",
@@ -582,13 +601,20 @@ function filterArtists(artists, searchParams) {
 
 const server = createServer(async (request, response) => {
   if (!request.url) {
-    sendJson(response, 400, { error: "Missing request URL." });
+    sendJson(request, response, 400, { error: "Missing request URL." });
     return;
   }
 
   if (request.method === "OPTIONS") {
+    const allowedOrigin = getAllowedOrigin(request);
     response.writeHead(204, {
-      "Access-Control-Allow-Origin": "*",
+      ...(allowedOrigin
+        ? {
+            "Access-Control-Allow-Origin": allowedOrigin,
+            "Access-Control-Allow-Credentials": "true",
+            Vary: "Origin",
+          }
+        : {}),
       "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type",
     });
@@ -597,7 +623,7 @@ const server = createServer(async (request, response) => {
   }
 
   if (!["GET", "POST", "PUT"].includes(request.method)) {
-    sendJson(response, 405, { error: "Method not allowed." });
+    sendJson(request, response, 405, { error: "Method not allowed." });
     return;
   }
 
@@ -609,7 +635,7 @@ const server = createServer(async (request, response) => {
     const authenticatedUser = await getAuthenticatedUser(request);
 
     if (url.pathname === "/api/health") {
-      sendJson(response, 200, {
+      sendJson(request, response, 200, {
         ok: true,
         festivals: ["coachella", "dolab", "quasar"],
         artistCount: data.artists.length,
@@ -620,7 +646,7 @@ const server = createServer(async (request, response) => {
 
     if (url.pathname === "/api/db-test") {
       const result = await query("SELECT NOW() AS current_time;");
-      sendJson(response, 200, {
+      sendJson(request, response, 200, {
         ok: true,
         current_time: result.rows[0]?.current_time ?? null,
       });
@@ -628,7 +654,7 @@ const server = createServer(async (request, response) => {
     }
 
     if (url.pathname === "/api/auth/me") {
-      sendJson(response, 200, {
+      sendJson(request, response, 200, {
         user: authenticatedUser ? publicUser(authenticatedUser) : null,
       });
       return;
@@ -638,6 +664,7 @@ const server = createServer(async (request, response) => {
       const rateLimit = consumeAuthRateLimit(request, "signup");
       if (rateLimit) {
         sendJson(
+          request,
           response,
           429,
           { error: "Too many signup attempts. Please try again later." },
@@ -656,6 +683,7 @@ const server = createServer(async (request, response) => {
       }
 
       sendJson(
+        request,
         response,
         201,
         {
@@ -672,6 +700,7 @@ const server = createServer(async (request, response) => {
       const rateLimit = consumeAuthRateLimit(request, "login");
       if (rateLimit) {
         sendJson(
+          request,
           response,
           429,
           { error: "Too many login attempts. Please try again later." },
@@ -690,6 +719,7 @@ const server = createServer(async (request, response) => {
       }
 
       sendJson(
+        request,
         response,
         200,
         {
@@ -706,6 +736,7 @@ const server = createServer(async (request, response) => {
       const cookies = parseCookies(request);
       await deleteSession(cookies[SESSION_COOKIE_NAME]);
       sendJson(
+        request,
         response,
         200,
         { ok: true },
@@ -717,7 +748,7 @@ const server = createServer(async (request, response) => {
     }
 
     if (url.pathname === "/api/lineups") {
-      sendJson(response, 200, {
+      sendJson(request, response, 200, {
         coachella: data.coachella,
         dolab: data.dolab,
         quasar: data.quasar,
@@ -733,13 +764,13 @@ const server = createServer(async (request, response) => {
       const ownerId = authenticatedUser?.id ?? (url.searchParams.get("userId") ?? "");
 
       if (!authenticatedUser && !validateGuestUserId(ownerId)) {
-        sendJson(response, 400, { error: "A valid guest userId is required." });
+        sendJson(request, response, 400, { error: "A valid guest userId is required." });
         return;
       }
 
       if (request.method === "GET") {
         const artistIds = await getSavedArtistIds(ownerId);
-        sendJson(response, 200, {
+        sendJson(request, response, 200, {
           ownerId,
           artistIds,
           count: artistIds.length,
@@ -751,7 +782,7 @@ const server = createServer(async (request, response) => {
       const body = await readJsonBody(request);
       const artistIds = Array.isArray(body.artistIds) ? body.artistIds : null;
       if (!artistIds) {
-        sendJson(response, 400, { error: "artistIds must be an array." });
+        sendJson(request, response, 400, { error: "artistIds must be an array." });
         return;
       }
 
@@ -759,7 +790,7 @@ const server = createServer(async (request, response) => {
       const sanitizedArtistIds = artistIds.filter((artistId) => validArtistIds.has(artistId));
       const nextArtistIds = await updateSavedArtistIds(ownerId, sanitizedArtistIds);
 
-      sendJson(response, 200, {
+      sendJson(request, response, 200, {
         ownerId,
         artistIds: nextArtistIds,
         count: nextArtistIds.length,
@@ -771,11 +802,11 @@ const server = createServer(async (request, response) => {
     if (url.pathname.startsWith("/api/lineups/")) {
       const festival = url.pathname.split("/").pop();
       if (!festival || !data[festival]) {
-        sendJson(response, 404, { error: "Lineup not found." });
+        sendJson(request, response, 404, { error: "Lineup not found." });
         return;
       }
 
-      sendJson(response, 200, {
+      sendJson(request, response, 200, {
         festival,
         artists: data[festival],
         count: data[festival].length,
@@ -785,7 +816,7 @@ const server = createServer(async (request, response) => {
 
     if (url.pathname === "/api/artists") {
       const artists = filterArtists(data.artists, url.searchParams);
-      sendJson(response, 200, {
+      sendJson(request, response, 200, {
         count: artists.length,
         artists,
       });
@@ -797,17 +828,17 @@ const server = createServer(async (request, response) => {
       const artist = data.artists.find((entry) => entry.id === artistId);
 
       if (!artist) {
-        sendJson(response, 404, { error: "Artist not found." });
+        sendJson(request, response, 404, { error: "Artist not found." });
         return;
       }
 
-      sendJson(response, 200, artist);
+      sendJson(request, response, 200, artist);
       return;
     }
 
-    sendJson(response, 404, { error: "Route not found." });
+    sendJson(request, response, 404, { error: "Route not found." });
   } catch (error) {
-    sendJson(response, 500, {
+    sendJson(request, response, 500, {
       error: error instanceof Error ? error.message : "Unexpected server error.",
     });
   }
