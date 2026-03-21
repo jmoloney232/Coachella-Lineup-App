@@ -413,9 +413,9 @@ a {
 
 .artistPanel {
   margin: 16px auto 8px;
-  padding: 22px;
+  padding: 16px 18px;
   max-width: 1080px;
-  border-top: 4px solid var(--panel-border);
+  border-top: 2px solid rgba(87, 116, 117, 0.38);
   background:
     linear-gradient(180deg, rgba(2, 16, 18, 0.95), rgba(0, 10, 11, 0.92)),
     var(--panel);
@@ -425,9 +425,9 @@ a {
 .artistPanelHeader {
   display: flex;
   justify-content: space-between;
-  gap: 18px;
+  gap: 14px;
   align-items: flex-start;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 
 .panelEyebrow,
@@ -443,41 +443,44 @@ a {
 }
 
 .artistPanel h3 {
-  margin: 4px 0;
-  font-size: clamp(1.55rem, 2.9vw, 2.35rem);
+  margin: 2px 0;
+  font-size: clamp(1.34rem, 2.3vw, 2rem);
   line-height: 0.95;
 }
 
 .panelGenre {
   color: var(--text-muted);
-  font-size: clamp(0.82rem, 1.18vw, 1rem);
-}
-
-.panelMeta {
-  text-align: right;
-  display: grid;
-  gap: 6px;
-  justify-items: end;
-  font-size: 0.92rem;
-  font-weight: 800;
+  font-size: clamp(0.76rem, 1vw, 0.92rem);
 }
 
 .saveArtistButton {
-  padding: 8px 10px;
+  padding: 6px 9px;
   border: 1px solid rgba(255, 255, 255, 0.16);
   background: rgba(255, 255, 255, 0.04);
   color: rgba(243, 233, 213, 0.88);
-  font-size: 0.72rem;
+  font-size: 0.66rem;
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   cursor: pointer;
 }
 
+.saveArtistButton:hover,
+.saveArtistButton:focus-visible,
 .saveArtistButton.active {
   border-color: rgba(255, 205, 117, 0.52);
   background: rgba(255, 205, 117, 0.12);
   color: var(--accent-cream);
+  outline: none;
+}
+
+.panelMeta {
+  text-align: right;
+  display: grid;
+  gap: 4px;
+  justify-items: end;
+  font-size: 0.84rem;
+  font-weight: 800;
 }
 
 .panelMeta a {
@@ -491,21 +494,25 @@ a {
 }
 
 .panelNote {
-  margin: 0 0 14px;
+  margin: 0 0 10px;
   max-width: 68ch;
   color: var(--text-muted);
-  font-size: 0.92rem;
-  line-height: 1.4;
+  font-size: 0.84rem;
+  line-height: 1.28;
 }
 
 .relatedArtistsSection {
-  margin: 0 0 16px;
+  margin: 0 0 10px;
+}
+
+.relatedArtistsSectionBottom {
+  margin-top: 10px;
 }
 
 .relatedArtistsLabel {
-  margin: 0 0 8px;
+  margin: 0 0 6px;
   color: #ff7442;
-  font-size: 0.84rem;
+  font-size: 0.74rem;
   font-weight: 800;
   letter-spacing: 0.18em;
   text-transform: uppercase;
@@ -514,7 +521,7 @@ a {
 .relatedArtistsList {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 10px;
+  gap: 6px 8px;
 }
 
 .relatedArtistLink,
@@ -523,7 +530,7 @@ a {
   border: 0;
   background: transparent;
   color: #97d8e5;
-  font-size: 0.94rem;
+  font-size: 0.84rem;
   font-weight: 800;
   letter-spacing: 0.04em;
 }
@@ -544,23 +551,33 @@ a {
   color: rgba(243, 233, 213, 0.58);
 }
 
-.artistPanelContent {
+.artistPanelLayout {
   display: block;
 }
 
-.artistPanelContent.hasImage {
+.artistPanelLayout.hasImage {
   display: grid;
-  grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
-  gap: 18px;
-  align-items: start;
+  grid-template-columns: minmax(205px, 250px) minmax(0, 1fr);
+  gap: 14px;
+  align-items: stretch;
 }
 
-.artistImageWrap {
+.artistImageColumn {
   position: relative;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.03);
-  aspect-ratio: 3 / 4;
+  min-height: 100%;
+}
+
+.artistImageColumn::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(5, 12, 24, 0.22), rgba(5, 12, 24, 0.08) 24%, rgba(5, 12, 24, 0.08) 76%, rgba(5, 12, 24, 0.24)),
+    linear-gradient(90deg, rgba(5, 12, 24, 0.24), rgba(5, 12, 24, 0) 14%, rgba(5, 12, 24, 0) 82%, rgba(5, 12, 24, 0.34));
 }
 
 .artistImage {
@@ -570,30 +587,14 @@ a {
   object-fit: cover;
 }
 
-.trackSections {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 18px;
+.artistPanelMain {
   min-width: 0;
-}
-
-.trackSection {
-  min-width: 0;
-}
-
-.trackSectionLabel {
-  margin: 0 0 8px;
-  color: #ff7442;
-  font-size: 0.84rem;
-  font-weight: 800;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
 }
 
 .trackGridScroller {
-  max-height: 360px;
+  max-height: 125px;
   overflow-y: auto;
-  padding-right: 8px;
+  padding-right: 4px;
   scrollbar-width: thin;
   scrollbar-color: rgba(151, 216, 229, 0.45) rgba(255, 255, 255, 0.04);
 }
@@ -612,7 +613,7 @@ a {
 
 .trackGrid {
   display: grid;
-  gap: 14px;
+  gap: 0;
   grid-template-columns: 1fr;
 }
 
@@ -629,18 +630,77 @@ a {
 }
 
 .trackGrid li {
-  padding: 6px 0;
+  padding: 4px 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  font-size: clamp(0.58rem, 0.8vw, 0.72rem);
+  font-size: clamp(0.56rem, 0.72vw, 0.68rem);
   font-weight: 800;
-  line-height: 1.12;
+  line-height: 1.08;
+}
+
+.trackSections {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: 10px;
+}
+
+.trackSections.single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.trackSectionsStackedScroller {
+  max-height: 148px;
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(151, 216, 229, 0.45) rgba(255, 255, 255, 0.04);
+}
+
+.trackSectionsStackedScroller::-webkit-scrollbar {
+  width: 8px;
+}
+
+.trackSectionsStackedScroller::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.trackSectionsStackedScroller::-webkit-scrollbar-thumb {
+  background: rgba(151, 216, 229, 0.45);
+}
+
+.trackSectionsStacked {
+  gap: 20px;
+}
+
+.trackSection {
+  min-width: 0;
+}
+
+.trackSectionsStacked .trackSection {
+  display: grid;
+  gap: 0;
+}
+
+.trackSectionsStacked .trackGridScroller {
+  max-height: none;
+  overflow: visible;
+  padding-right: 0;
+}
+
+.trackSectionLabel {
+  margin: 0 0 6px;
+  color: #ff7442;
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
 }
 
 .panelFootnote {
-  margin-top: 14px;
+  margin-top: 10px;
   color: rgba(151, 216, 229, 0.45);
   letter-spacing: 0.16em;
-  font-size: 0.74rem;
+  font-size: 0.66rem;
 }
 
 .statusScreen {
@@ -796,10 +856,6 @@ a {
 
 .dolabEyebrow {
   color: #ffb3aa;
-}
-
-.trackSections.single {
-  grid-template-columns: minmax(0, 1fr);
 }
 
 .dolabFooter {
@@ -1200,7 +1256,8 @@ a {
   }
 
   .artistPanel {
-    padding: 18px 16px;
+    margin-inline: 0;
+    padding: 10px;
   }
 
   .day-friday .lineupRow,
@@ -1225,12 +1282,13 @@ a {
     justify-items: start;
   }
 
-  .artistPanelContent.hasImage {
-    grid-template-columns: 1fr;
+  .artistPanelLayout.hasImage {
+    grid-template-columns: minmax(112px, 136px) minmax(0, 1fr);
+    gap: 10px;
   }
 
-  .artistImageWrap {
-    max-width: 260px;
+  .artistImageColumn {
+    min-height: 100%;
   }
 
   .trackSections {
@@ -1238,7 +1296,7 @@ a {
   }
 
   .trackGridScroller {
-    max-height: 320px;
+    max-height: 160px;
     padding-right: 2px;
   }
 

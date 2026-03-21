@@ -20,6 +20,7 @@ const SESSION_DURATION_MS = 1000 * 60 * 60 * 24 * 30;
 const SESSION_CLEANUP_INTERVAL_MS = 1000 * 60 * 15;
 const AUTH_RATE_LIMIT_WINDOW_MS = Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS ?? 1000 * 60 * 15);
 const AUTH_RATE_LIMIT_MAX_REQUESTS = Number(process.env.AUTH_RATE_LIMIT_MAX_REQUESTS ?? 10);
+const MAX_JSON_BODY_BYTES = 32 * 1024;
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ?? "http://localhost:5173,http://127.0.0.1:5173")
   .split(",")
   .map((value) => value.trim())
@@ -83,6 +84,33 @@ function getAllowedOrigin(request) {
   return null;
 }
 
+function assertTrustedOrigin(request) {
+  if (getAllowedOrigin(request)) {
+    return;
+  }
+
+  throw createHttpError(403, "Request origin is not allowed.");
+}
+
+function createHttpError(statusCode, message) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  error.expose = statusCode >= 400 && statusCode < 500;
+  return error;
+}
+
+function getErrorStatusCode(error) {
+  return error && typeof error === "object" && "statusCode" in error && typeof error.statusCode === "number" ? error.statusCode : 500;
+}
+
+function getClientErrorMessage(error, statusCode) {
+  if (error instanceof Error && error.expose && statusCode >= 400 && statusCode < 500) {
+    return error.message;
+  }
+
+  return statusCode >= 500 ? "Unexpected server error." : "Request failed.";
+}
+
 function getPool() {
   if (pool) {
     return pool;
@@ -90,7 +118,7 @@ function getPool() {
 
   const connectionString = getDatabaseUrl();
   if (!connectionString) {
-    throw new Error("DATABASE_URL is required. Copy .env.example to .env and paste your Neon connection string.");
+    throw createHttpError(500, "DATABASE_URL is required. Copy .env.example to .env and paste your Neon connection string.");
   }
 
   pool = new Pool({
@@ -257,8 +285,13 @@ function sendJson(request, response, statusCode, payload, headers = {}) {
 
 async function readJsonBody(request) {
   const chunks = [];
+  let totalBytes = 0;
 
   for await (const chunk of request) {
+    totalBytes += chunk.length;
+    if (totalBytes > MAX_JSON_BODY_BYTES) {
+      throw createHttpError(413, "Request body is too large.");
+    }
     chunks.push(chunk);
   }
 
@@ -401,16 +434,16 @@ async function createUser(email, password) {
   const normalizedEmail = normalizeEmail(email);
 
   if (!normalizedEmail || !normalizedEmail.includes("@")) {
-    throw new Error("Please enter a valid email address.");
+    throw createHttpError(400, "Please enter a valid email address.");
   }
 
   if (password.length < 8) {
-    throw new Error("Password must be at least 8 characters.");
+    throw createHttpError(400, "Password must be at least 8 characters.");
   }
 
   const existingUser = await query("SELECT id FROM users WHERE email = $1;", [normalizedEmail]);
   if (existingUser.rowCount > 0) {
-    throw new Error("An account with that email already exists.");
+    throw createHttpError(409, "An account with that email already exists.");
   }
 
   const passwordRecord = await hashPassword(password);
@@ -439,12 +472,12 @@ async function authenticateUser(email, password) {
   const user = result.rows[0];
 
   if (!user) {
-    throw new Error("Invalid email or password.");
+    throw createHttpError(401, "Invalid email or password.");
   }
 
   const isValid = await verifyPassword(password, user.password_salt, user.password_hash);
   if (!isValid) {
-    throw new Error("Invalid email or password.");
+    throw createHttpError(401, "Invalid email or password.");
   }
 
   return user;
@@ -644,15 +677,6 @@ const server = createServer(async (request, response) => {
       return;
     }
 
-    if (url.pathname === "/api/db-test") {
-      const result = await query("SELECT NOW() AS current_time;");
-      sendJson(request, response, 200, {
-        ok: true,
-        current_time: result.rows[0]?.current_time ?? null,
-      });
-      return;
-    }
-
     if (url.pathname === "/api/auth/me") {
       sendJson(request, response, 200, {
         user: authenticatedUser ? publicUser(authenticatedUser) : null,
@@ -661,6 +685,8 @@ const server = createServer(async (request, response) => {
     }
 
     if (url.pathname === "/api/auth/signup" && request.method === "POST") {
+      assertTrustedOrigin(request);
+
       const rateLimit = consumeAuthRateLimit(request, "signup");
       if (rateLimit) {
         sendJson(
@@ -697,6 +723,8 @@ const server = createServer(async (request, response) => {
     }
 
     if (url.pathname === "/api/auth/login" && request.method === "POST") {
+      assertTrustedOrigin(request);
+
       const rateLimit = consumeAuthRateLimit(request, "login");
       if (rateLimit) {
         sendJson(
@@ -733,6 +761,8 @@ const server = createServer(async (request, response) => {
     }
 
     if (url.pathname === "/api/auth/logout" && request.method === "POST") {
+      assertTrustedOrigin(request);
+
       const cookies = parseCookies(request);
       await deleteSession(cookies[SESSION_COOKIE_NAME]);
       sendJson(
@@ -778,6 +808,8 @@ const server = createServer(async (request, response) => {
         });
         return;
       }
+
+      assertTrustedOrigin(request);
 
       const body = await readJsonBody(request);
       const artistIds = Array.isArray(body.artistIds) ? body.artistIds : null;
@@ -838,8 +870,13 @@ const server = createServer(async (request, response) => {
 
     sendJson(request, response, 404, { error: "Route not found." });
   } catch (error) {
-    sendJson(request, response, 500, {
-      error: error instanceof Error ? error.message : "Unexpected server error.",
+    const statusCode = getErrorStatusCode(error);
+    if (statusCode >= 500) {
+      console.error("Request failed:", error);
+    }
+
+    sendJson(request, response, statusCode, {
+      error: getClientErrorMessage(error, statusCode),
     });
   }
 });

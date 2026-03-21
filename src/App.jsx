@@ -149,57 +149,61 @@ function CoachellaArtistPanel({ artist, artistLookup, onRelatedArtistSelect, isS
 
   return (
     <article className="artistPanel">
-      <div className="artistPanelHeader">
-        <div>
-          <p className="panelEyebrow">{artist.day.toUpperCase()}</p>
-          <h3>{artist.artist}</h3>
-          <p className="panelGenre">{artist.genre || "Genre TBD"}</p>
-        </div>
-        <div className="panelMeta">
-          <SaveActionButton isSaved={isSaved} onToggleSave={onToggleSave} />
-          {artist.spotify_url ? (
-            <a href={artist.spotify_url} target="_blank" rel="noreferrer">
-              Open Spotify
-            </a>
-          ) : null}
-        </div>
-      </div>
-      <p className="panelNote">{artist.note || "More artist notes coming soon."}</p>
-      {relatedArtists.length > 0 ? (
-        <div className="relatedArtistsSection">
-          <p className="relatedArtistsLabel">Related Artists</p>
-          <div className="relatedArtistsList">
-            {relatedArtists.map((relatedArtist) =>
-              relatedArtist.targetArtist ? (
-                <button
-                  key={relatedArtist.name}
-                  className="relatedArtistLink"
-                  type="button"
-                  onClick={() => onRelatedArtistSelect(relatedArtist.targetArtist.id)}
-                >
-                  {relatedArtist.name}
-                </button>
-              ) : (
-                <span key={relatedArtist.name} className="relatedArtistText">
-                  {relatedArtist.name}
-                </span>
-              ),
-            )}
-          </div>
-        </div>
-      ) : null}
-      <div className={`artistPanelContent ${artist.imageUrl ? "hasImage" : ""}`}>
+      <div className={`artistPanelLayout ${artist.imageUrl ? "hasImage" : ""}`}>
         {artist.imageUrl ? (
-          <div className="artistImageWrap">
+          <div className="artistImageColumn">
             <img className="artistImage" src={artist.imageUrl} alt={artist.artist} />
           </div>
         ) : null}
-        <div className="trackSections">
-          <TrackSection label="Setlist Songs" tracks={artist.songsList} />
-          <TrackSection label="Popular Songs" tracks={artist.popularSongsList} />
+        <div className="artistPanelMain">
+          <div className="artistPanelHeader">
+            <div>
+              <p className="panelEyebrow">{artist.day.toUpperCase()}</p>
+              <h3>{artist.artist}</h3>
+              <p className="panelGenre">{artist.genre || "Genre TBD"}</p>
+            </div>
+            <div className="panelMeta">
+              <SaveActionButton isSaved={isSaved} onToggleSave={onToggleSave} />
+              {artist.spotify_url ? (
+                <a href={artist.spotify_url} target="_blank" rel="noreferrer">
+                  Open Spotify
+                </a>
+              ) : null}
+            </div>
+          </div>
+          <p className="panelNote">{artist.note || "More artist notes coming soon."}</p>
+          <div className="trackSectionsStackedScroller">
+            <div className="trackSections single trackSectionsStacked">
+              <TrackSection label="Popular Songs" tracks={artist.popularSongsList} compact />
+              <TrackSection label="Setlist Songs" tracks={artist.songsList} compact />
+            </div>
+          </div>
+          {relatedArtists.length > 0 ? (
+            <div className="relatedArtistsSection relatedArtistsSectionBottom">
+              <p className="relatedArtistsLabel">Related Artists</p>
+              <div className="relatedArtistsList">
+                {relatedArtists.map((relatedArtist) =>
+                  relatedArtist.targetArtist ? (
+                    <button
+                      key={relatedArtist.name}
+                      className="relatedArtistLink"
+                      type="button"
+                      onClick={() => onRelatedArtistSelect(relatedArtist.targetArtist.id)}
+                    >
+                      {relatedArtist.name}
+                    </button>
+                  ) : (
+                    <span key={relatedArtist.name} className="relatedArtistText">
+                      {relatedArtist.name}
+                    </span>
+                  ),
+                )}
+              </div>
+            </div>
+          ) : null}
+          <p className="panelFootnote">Based on your CSV data. You can expand the fields later without changing the layout.</p>
         </div>
       </div>
-      <p className="panelFootnote">Based on your CSV data. You can expand the fields later without changing the layout.</p>
     </article>
   );
 }
@@ -233,30 +237,32 @@ function DoLabArtistPanel({ artist, isSaved, onToggleSave }) {
 function GenericArtistPanel({ artist, eyebrow, isSaved, onToggleSave }) {
   return (
     <article className={`artistPanel ${artist.festival === "dolab" ? "dolabPanel" : artist.festival === "quasar" ? "quasarPanel" : ""}`}>
-      <div className="artistPanelHeader">
-        <div>
-          <p className={`panelEyebrow ${artist.festival === "dolab" ? "dolabEyebrow" : artist.festival === "quasar" ? "quasarEyebrow" : ""}`}>{eyebrow}</p>
-          <h3>{artist.artist}</h3>
-          <p className="panelGenre">{artist.genre || "Genre TBD"}</p>
-        </div>
-        <div className="panelMeta">
-          <SaveActionButton isSaved={isSaved} onToggleSave={onToggleSave} />
-          {artist.spotify_url ? (
-            <a href={artist.spotify_url} target="_blank" rel="noreferrer">
-              Open Spotify
-            </a>
-          ) : null}
-        </div>
-      </div>
-      <p className="panelNote">{artist.note || "Description coming soon."}</p>
-      <div className={`artistPanelContent ${artist.imageUrl ? "hasImage" : ""}`}>
+      <div className={`artistPanelLayout ${artist.imageUrl ? "hasImage" : ""}`}>
         {artist.imageUrl ? (
-          <div className="artistImageWrap">
+          <div className="artistImageColumn">
             <img className="artistImage" src={artist.imageUrl} alt={artist.artist} />
           </div>
         ) : null}
-        <div className="trackSections single">
-          <TrackSection label={artist.festival === "coachella" ? "Popular Songs" : "Popular Songs"} tracks={artist.popularSongsList ?? artist.songsList ?? []} compact />
+        <div className="artistPanelMain">
+          <div className="artistPanelHeader">
+            <div>
+              <p className={`panelEyebrow ${artist.festival === "dolab" ? "dolabEyebrow" : artist.festival === "quasar" ? "quasarEyebrow" : ""}`}>{eyebrow}</p>
+              <h3>{artist.artist}</h3>
+              <p className="panelGenre">{artist.genre || "Genre TBD"}</p>
+            </div>
+            <div className="panelMeta">
+              <SaveActionButton isSaved={isSaved} onToggleSave={onToggleSave} />
+              {artist.spotify_url ? (
+                <a href={artist.spotify_url} target="_blank" rel="noreferrer">
+                  Open Spotify
+                </a>
+              ) : null}
+            </div>
+          </div>
+          <p className="panelNote">{artist.note || "Description coming soon."}</p>
+          <div className="trackSections single">
+            <TrackSection label={artist.festival === "coachella" ? "Popular Songs" : "Popular Songs"} tracks={artist.popularSongsList ?? artist.songsList ?? []} compact />
+          </div>
         </div>
       </div>
     </article>
