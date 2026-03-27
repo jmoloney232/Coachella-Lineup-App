@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   DAY_ORDER,
   DOLAB_ROW_PATTERNS,
@@ -9,6 +9,7 @@ import {
 } from "./lib/lineupData";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
+const PLAYLIST_STORAGE_KEY = "coachella-playlist";
 
 const DAY_META = {
   Friday: { label: "FRIDAY APRIL 10 & 17" },
@@ -21,6 +22,32 @@ const ROW_PATTERNS = {
   Saturday: [1, 9, 10, 10, 13],
   Sunday: [1, 9, 10, 10, 11, 1],
 };
+
+const STAGE_ORDER = [
+  "Coachella Stage",
+  "Outdoor Theater",
+  "Sahara",
+  "Mojave",
+  "Gobi",
+  "Sonora",
+  "Yuma",
+  "Quasar",
+  "Heineken House",
+];
+
+const STAGE_COLORS = {
+  "Coachella Stage": "#c9a84c",
+  "Outdoor Theater": "#5ab4e0",
+  "Sahara":          "#e07a3a",
+  "Mojave":          "#3aada3",
+  "Gobi":            "#9e7ec8",
+  "Sonora":          "#d4608a",
+  "Yuma":            "#3aad6f",
+  "Quasar":          "#d4895a",
+  "Heineken House":  "#4a9e5c",
+};
+
+const PX_PER_MIN = 2;
 
 function buildRows(artists, pattern) {
   const rows = [];
@@ -61,7 +88,7 @@ function coachellaArtistClassName(rowIndex, rowLength, artistIndex, totalRows) {
   return "artistButton tierFive";
 }
 
-function TrackSection({ label, tracks, compact = false }) {
+function TrackSection({ label, tracks, compact = false, onAddSong, isInPlaylist }) {
   return (
     <div className="trackSection">
       <p className="trackSectionLabel">{label}</p>
@@ -70,7 +97,19 @@ function TrackSection({ label, tracks, compact = false }) {
           {tracks.length > 0 ? (
             <ol start={1}>
               {tracks.map((track) => (
-                <li key={track}>{track}</li>
+                <li key={track}>
+                  <span className="trackName">{track}</span>
+                  {onAddSong ? (
+                    <button
+                      className={`songAddButton${isInPlaylist && isInPlaylist(track) ? " added" : ""}`}
+                      type="button"
+                      onClick={() => onAddSong(track)}
+                      aria-label={isInPlaylist && isInPlaylist(track) ? "Remove from playlist" : "Add to playlist"}
+                    >
+                      {isInPlaylist && isInPlaylist(track) ? "✓" : "+"}
+                    </button>
+                  ) : null}
+                </li>
               ))}
             </ol>
           ) : (
@@ -141,7 +180,7 @@ function AuthMenu({
   );
 }
 
-function CoachellaArtistPanel({ artist, artistLookup, onRelatedArtistSelect, isSaved, onToggleSave }) {
+function CoachellaArtistPanel({ artist, artistLookup, onRelatedArtistSelect, isSaved, onToggleSave, onAddSong, isSongInPlaylist }) {
   const relatedArtists = artist.relatedArtistsList.map((name) => ({
     name,
     targetArtist: artistLookup.get(name) ?? null,
@@ -174,8 +213,20 @@ function CoachellaArtistPanel({ artist, artistLookup, onRelatedArtistSelect, isS
           <p className="panelNote">{artist.note || "More artist notes coming soon."}</p>
           <div className="trackSectionsStackedScroller">
             <div className="trackSections single trackSectionsStacked">
-              <TrackSection label="Popular Songs" tracks={artist.popularSongsList} compact />
-              <TrackSection label="Setlist Songs" tracks={artist.songsList} compact />
+              <TrackSection
+                label="Popular Songs"
+                tracks={artist.popularSongsList}
+                compact
+                onAddSong={onAddSong ? (songName) => onAddSong({ songName, artistName: artist.artist, artistId: artist.id, day: artist.day, type: "popular" }) : undefined}
+                isInPlaylist={isSongInPlaylist ? (songName) => isSongInPlaylist(artist.id, songName) : undefined}
+              />
+              <TrackSection
+                label="Setlist Songs"
+                tracks={artist.songsList}
+                compact
+                onAddSong={onAddSong ? (songName) => onAddSong({ songName, artistName: artist.artist, artistId: artist.id, day: artist.day, type: "setlist" }) : undefined}
+                isInPlaylist={isSongInPlaylist ? (songName) => isSongInPlaylist(artist.id, songName) : undefined}
+              />
             </div>
           </div>
           {relatedArtists.length > 0 ? (
@@ -208,7 +259,7 @@ function CoachellaArtistPanel({ artist, artistLookup, onRelatedArtistSelect, isS
   );
 }
 
-function DoLabArtistPanel({ artist, isSaved, onToggleSave }) {
+function DoLabArtistPanel({ artist, isSaved, onToggleSave, onAddSong, isSongInPlaylist }) {
   return (
     <article className="artistPanel dolabPanel">
       <div className="artistPanelHeader">
@@ -228,13 +279,19 @@ function DoLabArtistPanel({ artist, isSaved, onToggleSave }) {
       </div>
       <p className="panelNote">{artist.note || "Description coming soon."}</p>
       <div className="trackSections single">
-        <TrackSection label="Popular Songs" tracks={artist.popularSongsList} compact />
+        <TrackSection
+          label="Popular Songs"
+          tracks={artist.popularSongsList}
+          compact
+          onAddSong={onAddSong ? (songName) => onAddSong({ songName, artistName: artist.artist, artistId: artist.id, day: artist.day, type: "popular" }) : undefined}
+          isInPlaylist={isSongInPlaylist ? (songName) => isSongInPlaylist(artist.id, songName) : undefined}
+        />
       </div>
     </article>
   );
 }
 
-function GenericArtistPanel({ artist, eyebrow, isSaved, onToggleSave }) {
+function GenericArtistPanel({ artist, eyebrow, isSaved, onToggleSave, onAddSong, isSongInPlaylist }) {
   return (
     <article className={`artistPanel ${artist.festival === "dolab" ? "dolabPanel" : artist.festival === "quasar" ? "quasarPanel" : ""}`}>
       <div className={`artistPanelLayout ${artist.imageUrl ? "hasImage" : ""}`}>
@@ -261,7 +318,13 @@ function GenericArtistPanel({ artist, eyebrow, isSaved, onToggleSave }) {
           </div>
           <p className="panelNote">{artist.note || "Description coming soon."}</p>
           <div className="trackSections single">
-            <TrackSection label={artist.festival === "coachella" ? "Popular Songs" : "Popular Songs"} tracks={artist.popularSongsList ?? artist.songsList ?? []} compact />
+            <TrackSection
+              label="Popular Songs"
+              tracks={artist.popularSongsList ?? artist.songsList ?? []}
+              compact
+              onAddSong={onAddSong ? (songName) => onAddSong({ songName, artistName: artist.artist, artistId: artist.id, day: artist.day, type: "popular" }) : undefined}
+              isInPlaylist={isSongInPlaylist ? (songName) => isSongInPlaylist(artist.id, songName) : undefined}
+            />
           </div>
         </div>
       </div>
@@ -313,7 +376,7 @@ function DoLabRow({ artists, selectedArtistId, onSelect }) {
   );
 }
 
-function CoachellaDaySection({ day, artists, selectedArtistId, onSelect, artistLookup, savedArtistIds, onToggleSavedArtist }) {
+function CoachellaDaySection({ day, artists, selectedArtistId, onSelect, artistLookup, savedArtistIds, onToggleSavedArtist, onAddSong, isSongInPlaylist }) {
   const rows = useMemo(() => buildRows(artists, ROW_PATTERNS[day]), [artists, day]);
   const selectedArtist = artists.find((artist) => artist.id === selectedArtistId) ?? null;
   const selectedRowIndex = rows.findIndex((row) => row.some((artist) => artist.id === selectedArtistId));
@@ -337,6 +400,8 @@ function CoachellaDaySection({ day, artists, selectedArtistId, onSelect, artistL
               onRelatedArtistSelect={(artistId) => onSelect(artistId, false)}
               isSaved={savedArtistIds.includes(selectedArtist.id)}
               onToggleSave={() => onToggleSavedArtist(selectedArtist.id)}
+              onAddSong={onAddSong}
+              isSongInPlaylist={isSongInPlaylist}
             />
           ) : null}
         </div>
@@ -345,7 +410,7 @@ function CoachellaDaySection({ day, artists, selectedArtistId, onSelect, artistL
   );
 }
 
-function CoachellaPoster({ artists, selectedArtistId, onSelect, artistLookup, savedArtistIds = [], onToggleSavedArtist = () => {} }) {
+function CoachellaPoster({ artists, selectedArtistId, onSelect, artistLookup, savedArtistIds = [], onToggleSavedArtist = () => {}, onAddSong, isSongInPlaylist }) {
   const artistsByDay = useMemo(
     () =>
       DAY_ORDER.reduce((collection, day) => {
@@ -368,6 +433,8 @@ function CoachellaPoster({ artists, selectedArtistId, onSelect, artistLookup, sa
             artistLookup={artistLookup}
             savedArtistIds={savedArtistIds}
             onToggleSavedArtist={onToggleSavedArtist}
+            onAddSong={onAddSong}
+            isSongInPlaylist={isSongInPlaylist}
           />
         ) : null,
       )}
@@ -375,7 +442,7 @@ function CoachellaPoster({ artists, selectedArtistId, onSelect, artistLookup, sa
   );
 }
 
-function DoLabPage({ artists, selectedArtistId, onSelect, savedArtistIds, onToggleSavedArtist }) {
+function DoLabPage({ artists, selectedArtistId, onSelect, savedArtistIds, onToggleSavedArtist, onAddSong, isSongInPlaylist }) {
   const rows = useMemo(() => buildRows(artists, DOLAB_ROW_PATTERNS), [artists]);
   const selectedArtist = artists.find((artist) => artist.id === selectedArtistId) ?? null;
   const selectedRowIndex = rows.findIndex((row) => row.some((artist) => artist.id === selectedArtistId));
@@ -399,6 +466,8 @@ function DoLabPage({ artists, selectedArtistId, onSelect, savedArtistIds, onTogg
                 artist={selectedArtist}
                 isSaved={savedArtistIds.includes(selectedArtist.id)}
                 onToggleSave={() => onToggleSavedArtist(selectedArtist.id)}
+                onAddSong={onAddSong}
+                isSongInPlaylist={isSongInPlaylist}
               />
             ) : null}
           </div>
@@ -415,7 +484,7 @@ function DoLabPage({ artists, selectedArtistId, onSelect, savedArtistIds, onTogg
   );
 }
 
-function QuasarPage({ artists, selectedArtistId, onSelect, activeWeekend, onWeekendChange, savedArtistIds, onToggleSavedArtist }) {
+function QuasarPage({ artists, selectedArtistId, onSelect, activeWeekend, onWeekendChange, savedArtistIds, onToggleSavedArtist, onAddSong, isSongInPlaylist }) {
   const weekendArtists = useMemo(() => artists.filter((artist) => artist.weekend === activeWeekend), [artists, activeWeekend]);
   const artistsByDay = useMemo(
     () =>
@@ -481,6 +550,8 @@ function QuasarPage({ artists, selectedArtistId, onSelect, activeWeekend, onWeek
                   eyebrow={activeWeekend === "weekend1" ? "Weekend 1" : "Weekend 2"}
                   isSaved={savedArtistIds.includes(artist.id)}
                   onToggleSave={() => onToggleSavedArtist(artist.id)}
+                  onAddSong={onAddSong}
+                  isSongInPlaylist={isSongInPlaylist}
                 />
               ) : null}
             </div>
@@ -491,7 +562,7 @@ function QuasarPage({ artists, selectedArtistId, onSelect, activeWeekend, onWeek
   );
 }
 
-function CoachellaPage({ artists, selectedArtistId, onSelect, savedArtistIds, onToggleSavedArtist }) {
+function CoachellaPage({ artists, selectedArtistId, onSelect, savedArtistIds, onToggleSavedArtist, onAddSong, isSongInPlaylist }) {
   const artistLookup = useMemo(() => {
     const lookup = new Map();
     const normalizedLookup = new Map();
@@ -553,6 +624,8 @@ function CoachellaPage({ artists, selectedArtistId, onSelect, savedArtistIds, on
         artistLookup={artistLookup}
         savedArtistIds={savedArtistIds}
         onToggleSavedArtist={onToggleSavedArtist}
+        onAddSong={onAddSong}
+        isSongInPlaylist={isSongInPlaylist}
       />
     </main>
   );
@@ -578,7 +651,7 @@ function MyListRow({ artists, selectedArtistId, onSelect }) {
   );
 }
 
-function SavedDaySection({ day, artists, selectedArtistId, onSelect }) {
+function SavedDaySection({ day, artists, selectedArtistId, onSelect, onAddSong, isSongInPlaylist }) {
   const rows = useMemo(() => buildRows(artists, ROW_PATTERNS[day]), [artists, day]);
   const selectedArtist = artists.find((artist) => artist.id === selectedArtistId) ?? null;
   const selectedRowIndex = rows.findIndex((row) => row.some((artist) => artist.id === selectedArtistId));
@@ -609,6 +682,8 @@ function SavedDaySection({ day, artists, selectedArtistId, onSelect }) {
               }
               isSaved
               onToggleSave={() => onSelect(selectedArtist.id, false, true)}
+              onAddSong={onAddSong}
+              isSongInPlaylist={isSongInPlaylist}
             />
           ) : null}
         </div>
@@ -617,7 +692,7 @@ function SavedDaySection({ day, artists, selectedArtistId, onSelect }) {
   );
 }
 
-function SavedDoLabSection({ artists, selectedArtistId, onSelect }) {
+function SavedDoLabSection({ artists, selectedArtistId, onSelect, onAddSong, isSongInPlaylist }) {
   const rows = useMemo(() => buildBalancedRows(artists, 5), [artists]);
   const selectedArtist = artists.find((artist) => artist.id === selectedArtistId) ?? null;
   const selectedRowIndex = rows.findIndex((row) => row.some((artist) => artist.id === selectedArtistId));
@@ -634,6 +709,8 @@ function SavedDoLabSection({ artists, selectedArtistId, onSelect }) {
               eyebrow="DO LAB"
               isSaved
               onToggleSave={() => onSelect(selectedArtist.id, false, true)}
+              onAddSong={onAddSong}
+              isSongInPlaylist={isSongInPlaylist}
             />
           ) : null}
         </div>
@@ -642,7 +719,7 @@ function SavedDoLabSection({ artists, selectedArtistId, onSelect }) {
   );
 }
 
-function MyListPage({ coachellaArtists, dolabArtists, quasarArtists, selectedArtistIds, onToggleArtist, selectedArtistId, onSelect }) {
+function MyListPage({ coachellaArtists, dolabArtists, quasarArtists, selectedArtistIds, onToggleArtist, selectedArtistId, onSelect, onAddSong, isSongInPlaylist }) {
   const selectedIds = useMemo(() => new Set(selectedArtistIds), [selectedArtistIds]);
   const selectedCoachella = useMemo(
     () => coachellaArtists.filter((artist) => selectedIds.has(artist.id)),
@@ -715,6 +792,8 @@ function MyListPage({ coachellaArtists, dolabArtists, quasarArtists, selectedArt
                     }
                     onSelect(artistId, allowToggle);
                   }}
+                  onAddSong={onAddSong}
+                  isSongInPlaylist={isSongInPlaylist}
                 />
               ) : null,
             )}
@@ -729,6 +808,8 @@ function MyListPage({ coachellaArtists, dolabArtists, quasarArtists, selectedArt
                   }
                   onSelect(artistId, allowToggle);
                 }}
+                onAddSong={onAddSong}
+                isSongInPlaylist={isSongInPlaylist}
               />
             ) : null}
           </>
@@ -738,9 +819,356 @@ function MyListPage({ coachellaArtists, dolabArtists, quasarArtists, selectedArt
   );
 }
 
+function splitStageName(name) {
+  const words = name.split(" ");
+  if (words.length > 1) {
+    return { main: words.slice(0, -1).join(" ").toUpperCase(), sub: words[words.length - 1].toLowerCase() };
+  }
+  return { main: name.toUpperCase(), sub: null };
+}
+
+function ScheduleGrid({ sets, activeDay, activeWeekend, normalizedLookup, quasarW2ByDay, selectedArtistId, onSelectArtist, savedArtistIds = [] }) {
+  const daySets = sets.filter((s) => s.day === activeDay);
+  if (daySets.length === 0) return <p className="scheduleEmpty">No set times available.</p>;
+
+  const dayMin = Math.min(...daySets.map((s) => s.startMinutes));
+  const dayMax = Math.max(...daySets.map((s) => s.endMinutes));
+  const totalHeight = (dayMax - dayMin) * PX_PER_MIN;
+
+  const byStage = {};
+  STAGE_ORDER.forEach((stage) => {
+    byStage[stage] = daySets.filter((s) => s.stage === stage);
+  });
+  const activeStages = STAGE_ORDER.filter((stage) => byStage[stage].length > 0);
+
+  // Hour marks — time runs top=latest, bottom=earliest
+  const hourMarks = [];
+  const startHour = Math.ceil(dayMin / 60);
+  const endHour = Math.floor(dayMax / 60);
+  for (let h = endHour; h >= startHour; h--) {
+    const topPx = (dayMax - h * 60) * PX_PER_MIN;
+    const raw = h >= 24 ? h - 24 : h;
+    const display = raw === 0 ? 12 : raw > 12 ? raw - 12 : raw;
+    const period = h >= 12 && h < 24 ? "PM" : "AM";
+    hourMarks.push({ label: String(display), period, topPx, h });
+  }
+
+  const headerMirrorRef = useRef(null);
+  const bodyScrollRef = useRef(null);
+
+  function syncHeaderScroll(e) {
+    if (headerMirrorRef.current) {
+      headerMirrorRef.current.scrollLeft = e.currentTarget.scrollLeft;
+    }
+  }
+
+  const stageHeaderCells = (
+    <>
+      <div className="scheduleTimeCorner" />
+      {activeStages.map((stage) => {
+        const { main, sub } = splitStageName(stage);
+        return (
+          <div key={stage} className="scheduleStageHeader">
+            <span className="scheduleStageMain">{main}</span>
+            {sub ? <span className="scheduleStageSubtitle">{sub}</span> : null}
+          </div>
+        );
+      })}
+    </>
+  );
+
+  return (
+    <div className="scheduleGridOuter">
+      {/* Sticky header — outside overflow-x container so sticky works correctly */}
+      <div className="scheduleGridHeaderScroll" ref={headerMirrorRef}>
+        <div className="scheduleGridHeader">
+          {stageHeaderCells}
+        </div>
+      </div>
+
+      {/* Scrollable body */}
+      <div className="scheduleGridWrapper" ref={bodyScrollRef} onScroll={syncHeaderScroll}>
+        <div className="scheduleGridContainer">
+        {/* Grid body */}
+        <div className="scheduleGridBody">
+          {/* Time label column */}
+          <div className="scheduleTimeCol" style={{ height: totalHeight }}>
+            {hourMarks.map(({ label, period, topPx }) => (
+              <div key={`${label}${period}`} className="scheduleHourLabel" style={{ top: topPx }}>
+                <span className="scheduleHourNum">{label}</span>
+                <span className="scheduleHourPeriod">{period}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Stage columns */}
+          {activeStages.map((stage) => (
+            <div key={stage} className="scheduleStageCol" style={{ height: totalHeight }}>
+              {/* Horizontal hour gridlines */}
+              {hourMarks.map(({ topPx, label, period }) => (
+                <div key={`${label}${period}`} className="scheduleHourLine" style={{ top: topPx }} />
+              ))}
+
+              {/* Artist blocks */}
+              {byStage[stage].map((set, i) => {
+                // Flipped axis: later = higher up = smaller top
+                const topPx = (dayMax - set.endMinutes) * PX_PER_MIN;
+                const heightPx = Math.max((set.endMinutes - set.startMinutes) * PX_PER_MIN - 2, 20);
+
+                const effectiveArtist =
+                  stage === "Quasar" && activeWeekend === "weekend2"
+                    ? quasarW2ByDay.get(activeDay) ?? null
+                    : normalizedLookup.get(normalizeLookupValue(set.artist)) ?? null;
+
+                const displayName =
+                  stage === "Quasar" && activeWeekend === "weekend2" && effectiveArtist
+                    ? effectiveArtist.artist
+                    : set.artist;
+
+                const isSelected = effectiveArtist && selectedArtistId === effectiveArtist.id;
+                const isSaved = effectiveArtist && savedArtistIds.includes(effectiveArtist.id);
+
+                if (effectiveArtist) {
+                  return (
+                    <button
+                      key={`${set.artist}-${i}`}
+                      id={`sched-${effectiveArtist.id}`}
+                      className={`scheduleBlock matched${isSelected ? " active" : ""}${isSaved ? " saved" : ""}`}
+                      style={{ top: topPx, height: heightPx }}
+                      type="button"
+                      onClick={(e) => onSelectArtist(effectiveArtist.id, e.currentTarget.getBoundingClientRect())}
+                    >
+                      <span className="scheduleBlockName">{displayName}</span>
+                      <span className="scheduleBlockTime">• {set.startTime}</span>
+                    </button>
+                  );
+                }
+                return (
+                  <div
+                    key={`${set.artist}-${i}`}
+                    className="scheduleBlock unmatched"
+                    style={{ top: topPx, height: heightPx }}
+                  >
+                    <span className="scheduleBlockName">{displayName}</span>
+                    <span className="scheduleBlockTime">• {set.startTime}</span>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SchedulePage({
+  sets, activeDay, onDayChange, activeWeekend, onWeekendChange,
+  selectedArtistId, onSelectArtist, coachellaArtists, quasarArtists, savedArtistIds, onToggleSave,
+  onAddSong, isSongInPlaylist,
+}) {
+  // Combined lookup: coachella + quasar artists by normalized name
+  const normalizedLookup = useMemo(() => {
+    const map = new Map();
+    coachellaArtists.forEach((a) => map.set(normalizeLookupValue(a.artist), a));
+    quasarArtists.forEach((a) => map.set(normalizeLookupValue(a.artist), a));
+    return map;
+  }, [coachellaArtists, quasarArtists]);
+
+  // Full artist lookup for related-artist links in the panel
+  const artistLookup = useMemo(() => {
+    const lookup = new Map();
+    const normalizedFull = new Map();
+    coachellaArtists.forEach((a) => {
+      lookup.set(a.artist, a);
+      normalizedFull.set(normalizeLookupValue(a.artist), a);
+    });
+    coachellaArtists.forEach((a) => {
+      a.relatedArtistsList.forEach((name) => {
+        if (lookup.has(name)) return;
+        const match = normalizedFull.get(normalizeLookupValue(name));
+        if (match) lookup.set(name, match);
+      });
+    });
+    return lookup;
+  }, [coachellaArtists]);
+
+  // W2 Quasar artists keyed by day for the grid substitution
+  const quasarW2ByDay = useMemo(() => {
+    const map = new Map();
+    quasarArtists.filter((a) => a.weekend === "weekend2").forEach((a) => map.set(a.day, a));
+    return map;
+  }, [quasarArtists]);
+
+  // Find selected artist across both pools
+  const selectedArtist = useMemo(
+    () => coachellaArtists.find((a) => a.id === selectedArtistId) ?? quasarArtists.find((a) => a.id === selectedArtistId) ?? null,
+    [coachellaArtists, quasarArtists, selectedArtistId],
+  );
+
+  const days = ["Friday", "Saturday", "Sunday"];
+  const dayLabels =
+    activeWeekend === "weekend1"
+      ? { Friday: "FRI APR 10", Saturday: "SAT APR 11", Sunday: "SUN APR 12" }
+      : { Friday: "FRI APR 17", Saturday: "SAT APR 18", Sunday: "SUN APR 19" };
+
+  function clearSelection() {
+    onSelectArtist("");
+  }
+
+  function handleGridSelect(id) {
+    if (selectedArtistId === id) {
+      clearSelection();
+    } else {
+      onSelectArtist(id);
+    }
+  }
+
+  const artistPanel = selectedArtist ? (
+    <>
+      <div className="schedulePanelBackdrop" onClick={clearSelection} />
+      <div className="schedulePanel">
+        <button className="schedulePanelClose" type="button" onClick={clearSelection} aria-label="Close">✕</button>
+        {selectedArtist.festival === "quasar" ? (
+          <GenericArtistPanel
+            artist={selectedArtist}
+            eyebrow={activeWeekend === "weekend1" ? "QUASAR WEEKEND 1" : "QUASAR WEEKEND 2"}
+            isSaved={savedArtistIds.includes(selectedArtist.id)}
+            onToggleSave={() => onToggleSave(selectedArtist.id)}
+            onAddSong={onAddSong}
+            isSongInPlaylist={isSongInPlaylist}
+          />
+        ) : (
+          <CoachellaArtistPanel
+            artist={selectedArtist}
+            artistLookup={artistLookup}
+            onRelatedArtistSelect={(id) => onSelectArtist(id)}
+            isSaved={savedArtistIds.includes(selectedArtist.id)}
+            onToggleSave={() => onToggleSave(selectedArtist.id)}
+            onAddSong={onAddSong}
+            isSongInPlaylist={isSongInPlaylist}
+          />
+        )}
+      </div>
+    </>
+  ) : null;
+
+  return (
+    <main className={`scheduleShell day-${activeDay.toLowerCase()}`}>
+      <header className="scheduleHeader">
+        <div className="scheduleHeaderMeta">
+          <span className="scheduleHeaderLabel">COACHELLA</span>
+          <span className="scheduleWeekendTag">{activeWeekend === "weekend1" ? "weekend one" : "weekend two"}</span>
+        </div>
+        <h1 className="scheduleDayTitle">{activeDay.toLowerCase()}</h1>
+      </header>
+      <div className="scheduleWeekendNav">
+        <button
+          className={`scheduleWeekendButton${activeWeekend === "weekend1" ? " active" : ""}`}
+          type="button"
+          onClick={() => { onWeekendChange("weekend1"); clearSelection(); }}
+        >
+          Weekend 1
+        </button>
+        <button
+          className={`scheduleWeekendButton${activeWeekend === "weekend2" ? " active" : ""}`}
+          type="button"
+          onClick={() => { onWeekendChange("weekend2"); clearSelection(); }}
+        >
+          Weekend 2
+        </button>
+      </div>
+      <nav className="scheduleDayNav">
+        {days.map((day) => (
+          <button
+            key={day}
+            className={`scheduleDayButton${activeDay === day ? " active" : ""}`}
+            type="button"
+            onClick={() => { onDayChange(day); clearSelection(); }}
+          >
+            {dayLabels[day]}
+          </button>
+        ))}
+      </nav>
+      {artistPanel}
+      <ScheduleGrid
+        sets={sets}
+        activeDay={activeDay}
+        activeWeekend={activeWeekend}
+        normalizedLookup={normalizedLookup}
+        quasarW2ByDay={quasarW2ByDay}
+        selectedArtistId={selectedArtistId}
+        onSelectArtist={handleGridSelect}
+        savedArtistIds={savedArtistIds}
+      />
+      <p className="scheduleGatesLabel">GATES OPEN AT ONE</p>
+    </main>
+  );
+}
+
+function PlaylistPage({ playlistSongs, onToggleSong, guestUserId, authUser }) {
+  function handleExport() {
+    const base = API_BASE_URL || "";
+    const url = authUser
+      ? `${base}/api/playlist/export.csv`
+      : `${base}/api/playlist/export.csv?userId=${encodeURIComponent(guestUserId)}`;
+    window.location.href = url;
+  }
+
+  return (
+    <main className="playlistShell">
+      <div className="skyGlow" />
+      <div className="horizon" />
+      <header className="posterHeader playlistHeader">
+        <p>GOLDENVOICE PRESENTS IN INDIO</p>
+        <h1>MY PLAYLIST</h1>
+        <h2>COACHELLA 2026</h2>
+        <div className="locationRow">
+          <span>{playlistSongs.length} {playlistSongs.length === 1 ? "song" : "songs"}</span>
+        </div>
+      </header>
+
+      <section className="playlistBody">
+        {playlistSongs.length === 0 ? (
+          <p className="playlistEmpty">No songs added yet — hit + next to any song to start building your playlist.</p>
+        ) : (
+          <>
+            <div className="playlistActions">
+              <button className="playlistExportButton" type="button" onClick={handleExport}>
+                Export CSV
+              </button>
+            </div>
+            <div className="playlistSongList">
+              <div className="playlistTableHeader">
+                <span>SONG</span>
+                <span>ARTIST</span>
+              </div>
+              {playlistSongs.map((song) => (
+                <div key={`${song.artistId}::${song.songName}`} className="playlistSongRow">
+                  <span className="playlistSongName">{song.songName}</span>
+                  <span className="playlistArtistCol">{song.artistName}</span>
+                  <button
+                    className="playlistRemoveButton"
+                    type="button"
+                    onClick={() => onToggleSong(song)}
+                    aria-label={`Remove ${song.songName}`}
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </section>
+    </main>
+  );
+}
+
 function getInitialPage() {
   const hash = window.location.hash.replace("#", "");
-  if (hash === "dolab" || hash === "quasar" || hash === "my-list") {
+  if (hash === "dolab" || hash === "quasar" || hash === "my-list" || hash === "schedule" || hash === "playlist") {
     return hash;
   }
   return "coachella";
@@ -778,6 +1206,10 @@ async function requestJson(url, options = {}) {
 
 export default function App() {
   const [activePage, setActivePage] = useState(getInitialPage);
+  const [setTimesData, setSetTimesData] = useState([]);
+  const [activeScheduleDay, setActiveScheduleDay] = useState("Friday");
+  const [activeScheduleWeekend, setActiveScheduleWeekend] = useState("weekend1");
+  const [selectedScheduleArtistId, setSelectedScheduleArtistId] = useState("");
   const [coachellaArtists, setCoachellaArtists] = useState([]);
   const [dolabArtists, setDolabArtists] = useState([]);
   const [quasarArtists, setQuasarArtists] = useState([]);
@@ -800,6 +1232,14 @@ export default function App() {
       return [];
     }
   });
+  const [playlistSongs, setPlaylistSongs] = useState(() => {
+    try {
+      const stored = window.localStorage.getItem(PLAYLIST_STORAGE_KEY);
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -817,18 +1257,27 @@ export default function App() {
   }, [savedArtistIds]);
 
   useEffect(() => {
+    window.localStorage.setItem(PLAYLIST_STORAGE_KEY, JSON.stringify(playlistSongs));
+  }, [playlistSongs]);
+
+  useEffect(() => {
     let active = true;
 
     async function loadData() {
       try {
-        const [payload, authPayload] = await Promise.all([requestJson("/api/lineups"), requestJson("/api/auth/me")]);
+        const [payload, authPayload, setTimesPayload] = await Promise.all([
+          requestJson("/api/lineups"),
+          requestJson("/api/auth/me"),
+          requestJson("/api/set-times"),
+        ]);
         const nextCoachellaArtists = Array.isArray(payload.coachella) ? payload.coachella : [];
         const nextDolabArtists = Array.isArray(payload.dolab) ? payload.dolab : [];
         const nextQuasarArtists = Array.isArray(payload.quasar) ? payload.quasar : [];
         const nextAuthUser = authPayload.user ?? null;
-        const myListPayload = await requestJson(
-          nextAuthUser ? "/api/my-list" : `/api/my-list?userId=${encodeURIComponent(guestUserId)}`,
-        );
+        const [myListPayload, playlistPayload] = await Promise.all([
+          requestJson(nextAuthUser ? "/api/my-list" : `/api/my-list?userId=${encodeURIComponent(guestUserId)}`),
+          requestJson(nextAuthUser ? "/api/playlist" : `/api/playlist?userId=${encodeURIComponent(guestUserId)}`),
+        ]);
         const nextSavedArtistIds = Array.isArray(myListPayload.artistIds) ? myListPayload.artistIds : [];
         const localSavedArtistIds = (() => {
           try {
@@ -846,6 +1295,8 @@ export default function App() {
         setQuasarArtists(nextQuasarArtists);
         setAuthUser(nextAuthUser);
         setSavedArtistIds(nextSavedArtistIds);
+        setPlaylistSongs(Array.isArray(playlistPayload.songs) ? playlistPayload.songs : []);
+        setSetTimesData(Array.isArray(setTimesPayload.sets) ? setTimesPayload.sets : []);
 
         if (!nextAuthUser && nextSavedArtistIds.length === 0 && Array.isArray(localSavedArtistIds) && localSavedArtistIds.length > 0) {
           const migratedPayload = await requestJson(`/api/my-list?userId=${encodeURIComponent(guestUserId)}`, {
@@ -911,7 +1362,43 @@ export default function App() {
       setSavedArtistIds(Array.isArray(payload.artistIds) ? payload.artistIds : []);
     } catch (saveError) {
       setSavedArtistIds(currentArtistIds);
-      setError(saveError instanceof Error ? saveError.message : "Unable to save your list.");
+      // If logged in but the server doesn't recognize the session, clear auth state
+      // so the user gets a clear prompt to sign in again instead of a cryptic error.
+      if (authUser && saveError instanceof Error && saveError.message === "A valid guest userId is required.") {
+        setAuthUser(null);
+        setError("Your session has expired. Please sign in again.");
+      } else {
+        setError(saveError instanceof Error ? saveError.message : "Unable to save your list.");
+      }
+    }
+  }
+
+  function isSongInPlaylist(artistId, songName) {
+    const key = `${artistId}::${songName}`;
+    return playlistSongs.some((s) => `${s.artistId}::${s.songName}` === key);
+  }
+
+  async function handleTogglePlaylistSong(song) {
+    const key = `${song.artistId}::${song.songName}`;
+    const alreadyIn = playlistSongs.some((s) => `${s.artistId}::${s.songName}` === key);
+    const nextSongs = alreadyIn
+      ? playlistSongs.filter((s) => `${s.artistId}::${s.songName}` !== key)
+      : [...playlistSongs, song];
+
+    setPlaylistSongs(nextSongs);
+
+    try {
+      const payload = await requestJson(
+        authUser ? "/api/playlist" : `/api/playlist?userId=${encodeURIComponent(guestUserId)}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ songs: nextSongs }),
+        },
+      );
+      setPlaylistSongs(Array.isArray(payload.songs) ? payload.songs : []);
+    } catch {
+      setPlaylistSongs(playlistSongs);
     }
   }
 
@@ -936,10 +1423,18 @@ export default function App() {
       setAuthUser(payload.user ?? null);
       setAuthPassword("");
       setAuthMenuOpen(false);
-      const myListPayload = await requestJson("/api/my-list");
-      setSavedArtistIds(Array.isArray(myListPayload.artistIds) ? myListPayload.artistIds : []);
     } catch (authError) {
       setError(authError instanceof Error ? authError.message : "Unable to authenticate.");
+      setAuthPending(false);
+      return;
+    }
+
+    // Fetch the user's saved list after a successful login (separate error scope)
+    try {
+      const myListPayload = await requestJson("/api/my-list");
+      setSavedArtistIds(Array.isArray(myListPayload.artistIds) ? myListPayload.artistIds : []);
+    } catch {
+      // Non-critical — user is signed in; list will reload on next page refresh.
     } finally {
       setAuthPending(false);
     }
@@ -995,6 +1490,18 @@ export default function App() {
         }}>
           My List
         </button>
+        <button className={`siteNavButton ${activePage === "schedule" ? "active" : ""}`} type="button" onClick={() => {
+          window.location.hash = "schedule";
+          setActivePage("schedule");
+        }}>
+          Schedule
+        </button>
+        <button className={`siteNavButton ${activePage === "playlist" ? "active" : ""}`} type="button" onClick={() => {
+          window.location.hash = "playlist";
+          setActivePage("playlist");
+        }}>
+          Playlist
+        </button>
         <AuthMenu
           authUser={authUser}
           authEmail={authEmail}
@@ -1017,6 +1524,8 @@ export default function App() {
           onSelect={handleSelectArtist(setSelectedDolabArtistId)}
           savedArtistIds={savedArtistIds}
           onToggleSavedArtist={handleToggleSavedArtist}
+          onAddSong={handleTogglePlaylistSong}
+          isSongInPlaylist={isSongInPlaylist}
         />
       ) : activePage === "quasar" ? (
         <QuasarPage
@@ -1030,6 +1539,8 @@ export default function App() {
             setActiveQuasarWeekend(weekend);
             setSelectedQuasarArtistId("");
           }}
+          onAddSong={handleTogglePlaylistSong}
+          isSongInPlaylist={isSongInPlaylist}
         />
       ) : activePage === "my-list" ? (
         <MyListPage
@@ -1040,6 +1551,31 @@ export default function App() {
           onToggleArtist={handleToggleSavedArtist}
           selectedArtistId={selectedMyListArtistId}
           onSelect={handleSelectArtist(setSelectedMyListArtistId)}
+          onAddSong={handleTogglePlaylistSong}
+          isSongInPlaylist={isSongInPlaylist}
+        />
+      ) : activePage === "schedule" ? (
+        <SchedulePage
+          sets={setTimesData}
+          activeDay={activeScheduleDay}
+          onDayChange={setActiveScheduleDay}
+          activeWeekend={activeScheduleWeekend}
+          onWeekendChange={setActiveScheduleWeekend}
+          selectedArtistId={selectedScheduleArtistId}
+          onSelectArtist={setSelectedScheduleArtistId}
+          coachellaArtists={coachellaArtists}
+          quasarArtists={quasarArtists}
+          savedArtistIds={savedArtistIds}
+          onToggleSave={handleToggleSavedArtist}
+          onAddSong={handleTogglePlaylistSong}
+          isSongInPlaylist={isSongInPlaylist}
+        />
+      ) : activePage === "playlist" ? (
+        <PlaylistPage
+          playlistSongs={playlistSongs}
+          onToggleSong={handleTogglePlaylistSong}
+          guestUserId={guestUserId}
+          authUser={authUser}
         />
       ) : (
         <CoachellaPage
@@ -1048,6 +1584,8 @@ export default function App() {
           onSelect={handleSelectArtist(setSelectedCoachellaArtistId)}
           savedArtistIds={savedArtistIds}
           onToggleSavedArtist={handleToggleSavedArtist}
+          onAddSong={handleTogglePlaylistSong}
+          isSongInPlaylist={isSongInPlaylist}
         />
       )}
     </div>

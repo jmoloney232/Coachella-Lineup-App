@@ -4,7 +4,7 @@ export const DOLAB_ROW_PATTERNS = [2, 1, 4, 4, 2, 5, 4, 5, 4, 4, 4, 3, 5, 3, 4];
 export const MY_LIST_STORAGE_KEY = "coachella-personal-list";
 export const USER_ID_STORAGE_KEY = "coachella-user-id";
 
-const EXCLUDED_ARTISTS = new Set(["Anyma", "Josh Baker x Carlita", "DJ Snake"]);
+const EXCLUDED_ARTISTS = new Set(["Anyma presents Æden", "Josh Baker x Carlita", "DJ Snake"]);
 const DOLAB_WEEKEND_ONE_ARTISTS = new Set([
   "1TBSP",
   "ANDHIM",

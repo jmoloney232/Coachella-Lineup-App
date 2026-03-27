@@ -34,6 +34,7 @@ const csvFiles = {
 
 let cachedData = null;
 let cachedSignature = "";
+let setTimesCache = null;
 let pool = null;
 let bootstrapPromise = null;
 const authRateLimitStore = new Map();
@@ -85,7 +86,21 @@ function getAllowedOrigin(request) {
 }
 
 function assertTrustedOrigin(request) {
-  if (getAllowedOrigin(request)) {
+  const origin = request.headers.origin;
+
+  // No Origin header — allow (same-origin in some browsers, non-browser clients)
+  if (!origin) {
+    return;
+  }
+
+  // Origin is in the explicit allowlist
+  if (ALLOWED_ORIGINS.includes(origin)) {
+    return;
+  }
+
+  // Allow same-origin: Origin matches the server's own Host header
+  const host = request.headers.host;
+  if (host && (origin === `http://${host}` || origin === `https://${host}`)) {
     return;
   }
 
@@ -159,6 +174,14 @@ async function initializeDatabase() {
     CREATE TABLE IF NOT EXISTS saved_lists (
       owner_id TEXT PRIMARY KEY,
       artist_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS playlist_songs (
+      owner_id TEXT PRIMARY KEY,
+      songs    JSONB NOT NULL DEFAULT '[]'::jsonb,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
@@ -411,6 +434,37 @@ async function updateSavedArtistIds(ownerId, artistIds) {
   return nextArtistIds;
 }
 
+async function getPlaylistSongs(ownerId) {
+  const result = await query("SELECT songs FROM playlist_songs WHERE owner_id = $1;", [ownerId]);
+  if (result.rowCount === 0) return [];
+  const songs = result.rows[0].songs;
+  return Array.isArray(songs) ? songs : [];
+}
+
+async function updatePlaylistSongs(ownerId, songs) {
+  const seen = new Set();
+  const nextSongs = songs.filter((song) => {
+    if (!song || typeof song.songName !== "string" || typeof song.artistId !== "string") return false;
+    const key = `${song.artistId}::${song.songName}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  await query(
+    `
+      INSERT INTO playlist_songs (owner_id, songs, updated_at)
+      VALUES ($1, $2::jsonb, NOW())
+      ON CONFLICT (owner_id) DO UPDATE SET
+        songs = EXCLUDED.songs,
+        updated_at = NOW();
+    `,
+    [ownerId, JSON.stringify(nextSongs)],
+  );
+
+  return nextSongs;
+}
+
 async function mergeSavedArtistIds(fromOwnerId, toOwnerId) {
   if (!fromOwnerId || fromOwnerId === toOwnerId) {
     return getSavedArtistIds(toOwnerId);
@@ -587,6 +641,40 @@ function consumeAuthRateLimit(request, routeKey) {
   }
 
   return null;
+}
+
+function parseTimeToMinutes(timeStr) {
+  const [time, period] = timeStr.trim().split(" ");
+  let [hours, minutes] = time.split(":").map(Number);
+  if (period === "PM" && hours !== 12) hours += 12;
+  if (period === "AM" && hours === 12) hours = 0;
+  const total = hours * 60 + minutes;
+  // Post-midnight AM slots (e.g. 1:00 AM = 25th hour on the timeline)
+  if (period === "AM" && hours < 6) return total + 1440;
+  return total;
+}
+
+async function loadSetTimesData() {
+  if (setTimesCache) return setTimesCache;
+  const csvPath = path.join(__dirname, "public", "set-times-2026.csv");
+  const text = await readFile(csvPath, "utf8");
+  const lines = text.trim().split("\n");
+  const headers = lines[0].split(",").map((h) => h.trim());
+  setTimesCache = lines.slice(1).map((line) => {
+    const values = line.split(",").map((v) => v.trim());
+    const row = {};
+    headers.forEach((h, i) => (row[h] = values[i]));
+    return {
+      day: row.Day,
+      stage: row.Stage,
+      artist: row.Artist,
+      startMinutes: parseTimeToMinutes(row.Start_Time),
+      endMinutes: parseTimeToMinutes(row.End_Time),
+      startTime: row.Start_Time,
+      endTime: row.End_Time,
+    };
+  });
+  return setTimesCache;
 }
 
 function filterArtists(artists, searchParams) {
@@ -865,6 +953,70 @@ const server = createServer(async (request, response) => {
       }
 
       sendJson(request, response, 200, artist);
+      return;
+    }
+
+    if (url.pathname === "/api/playlist") {
+      const ownerId = authenticatedUser?.id ?? (url.searchParams.get("userId") ?? "");
+
+      if (!authenticatedUser && !validateGuestUserId(ownerId)) {
+        sendJson(request, response, 400, { error: "A valid guest userId is required." });
+        return;
+      }
+
+      if (request.method === "GET") {
+        const songs = await getPlaylistSongs(ownerId);
+        sendJson(request, response, 200, { ownerId, songs, count: songs.length });
+        return;
+      }
+
+      assertTrustedOrigin(request);
+
+      const body = await readJsonBody(request);
+      const songs = Array.isArray(body.songs) ? body.songs : null;
+      if (!songs) {
+        sendJson(request, response, 400, { error: "songs must be an array." });
+        return;
+      }
+
+      const nextSongs = await updatePlaylistSongs(ownerId, songs);
+      sendJson(request, response, 200, { ownerId, songs: nextSongs, count: nextSongs.length });
+      return;
+    }
+
+    if (url.pathname === "/api/playlist/export.csv") {
+      const ownerId = authenticatedUser?.id ?? (url.searchParams.get("userId") ?? "");
+
+      if (!authenticatedUser && !validateGuestUserId(ownerId)) {
+        sendJson(request, response, 400, { error: "A valid guest userId is required." });
+        return;
+      }
+
+      const songs = await getPlaylistSongs(ownerId);
+      const csvRows = ["song_name,artist,day"];
+      for (const song of songs) {
+        const row = [song.songName, song.artistName, song.day]
+          .map((field) => `"${String(field ?? "").replace(/"/g, '""')}"`)
+          .join(",");
+        csvRows.push(row);
+      }
+
+      const allowedOrigin = getAllowedOrigin(request);
+      response.writeHead(200, {
+        ...(allowedOrigin
+          ? { "Access-Control-Allow-Origin": allowedOrigin, "Access-Control-Allow-Credentials": "true", Vary: "Origin" }
+          : {}),
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Disposition": 'attachment; filename="coachella-playlist.csv"',
+        "Cache-Control": "no-store",
+      });
+      response.end(csvRows.join("\n"));
+      return;
+    }
+
+    if (url.pathname === "/api/set-times") {
+      const sets = await loadSetTimesData();
+      sendJson(request, response, 200, { sets });
       return;
     }
 
