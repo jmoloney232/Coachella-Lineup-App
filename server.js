@@ -1,5 +1,6 @@
 import { createHash, randomBytes, randomUUID, scrypt as scryptCallback } from "node:crypto";
 import { createServer } from "node:http";
+import { createReadStream } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { Pool } from "pg";
@@ -11,6 +12,7 @@ const scrypt = promisify(scryptCallback);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const publicDir = path.join(__dirname, "public");
+const distDir = path.join(__dirname, "dist");
 const dataDir = path.join(__dirname, "data");
 const savedListsFile = path.join(dataDir, "saved-lists.json");
 const authFile = path.join(dataDir, "auth.json");
@@ -1020,7 +1022,48 @@ const server = createServer(async (request, response) => {
       return;
     }
 
-    sendJson(request, response, 404, { error: "Route not found." });
+    // Serve static frontend files (SPA fallback)
+    const MIME_TYPES = {
+      ".html": "text/html; charset=utf-8",
+      ".js": "application/javascript; charset=utf-8",
+      ".css": "text/css; charset=utf-8",
+      ".svg": "image/svg+xml",
+      ".png": "image/png",
+      ".jpg": "image/jpeg",
+      ".ico": "image/x-icon",
+      ".woff2": "font/woff2",
+      ".woff": "font/woff",
+    };
+
+    const urlPath = url.pathname === "/" ? "/index.html" : url.pathname;
+    const filePath = path.resolve(distDir, "." + urlPath);
+
+    // Security: prevent path traversal outside dist
+    if (!filePath.startsWith(distDir + path.sep) && filePath !== distDir) {
+      sendJson(request, response, 400, { error: "Invalid path." });
+      return;
+    }
+
+    const serveFile = async (fp) => {
+      const fileStats = await stat(fp).catch(() => null);
+      if (!fileStats?.isFile()) return false;
+      const ext = path.extname(fp).toLowerCase();
+      const contentType = MIME_TYPES[ext] ?? "application/octet-stream";
+      const isImmutable = fp.includes(`${path.sep}assets${path.sep}`);
+      response.writeHead(200, {
+        "Content-Type": contentType,
+        "Cache-Control": isImmutable ? "public, max-age=31536000, immutable" : "no-cache",
+      });
+      createReadStream(fp).pipe(response);
+      return true;
+    };
+
+    if (!(await serveFile(filePath))) {
+      // SPA fallback: unknown paths → index.html
+      if (!(await serveFile(path.join(distDir, "index.html")))) {
+        sendJson(request, response, 404, { error: "Not found." });
+      }
+    }
   } catch (error) {
     const statusCode = getErrorStatusCode(error);
     if (statusCode >= 500) {
