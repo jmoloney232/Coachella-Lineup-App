@@ -133,12 +133,15 @@ function AuthMenu({
   authUser,
   authEmail,
   authPassword,
+  authConfirmPassword,
   authPending,
-  authMenuOpen,
-  onToggleMenu,
+  authMode,
+  onSetMode,
   onEmailChange,
   onPasswordChange,
-  onSubmit,
+  onConfirmPasswordChange,
+  onLoginSubmit,
+  onSignupSubmit,
   onLogout,
 }) {
   return (
@@ -149,30 +152,97 @@ function AuthMenu({
         </button>
       ) : (
         <>
-          <button className="authSecondaryButton compact" type="button" onClick={onToggleMenu} disabled={authPending}>
-            Sign In
-          </button>
-          {authMenuOpen ? (
-            <form className="authPopover" onSubmit={onSubmit}>
-              <label className="authField">
-                <span>Email</span>
-                <input type="email" value={authEmail} onChange={(event) => onEmailChange(event.target.value)} autoComplete="email" required />
-              </label>
-              <label className="authField">
-                <span>Password</span>
-                <input
-                  type="password"
-                  value={authPassword}
-                  onChange={(event) => onPasswordChange(event.target.value)}
-                  autoComplete="current-password"
-                  minLength={8}
-                  required
-                />
-              </label>
-              <button className="authPrimaryButton compact" type="submit" disabled={authPending}>
-                {authPending ? "Signing In..." : "Sign In"}
-              </button>
-            </form>
+          <div className="authNavButtons">
+            <button
+              className="authSecondaryButton compact"
+              type="button"
+              onClick={() => onSetMode(authMode === "login" ? null : "login")}
+              disabled={authPending}
+            >
+              Sign In
+            </button>
+            <button
+              className="authSecondaryButton compact"
+              type="button"
+              onClick={() => onSetMode(authMode === "signup" ? null : "signup")}
+              disabled={authPending}
+            >
+              Create Account
+            </button>
+          </div>
+          {authMode ? (
+            <div className="authPopover">
+              <div className="authModeTabs">
+                <button
+                  type="button"
+                  className={`authModeButton${authMode === "login" ? " active" : ""}`}
+                  onClick={() => onSetMode("login")}
+                >
+                  Sign In
+                </button>
+                <button
+                  type="button"
+                  className={`authModeButton${authMode === "signup" ? " active" : ""}`}
+                  onClick={() => onSetMode("signup")}
+                >
+                  Create Account
+                </button>
+              </div>
+              {authMode === "login" ? (
+                <form onSubmit={onLoginSubmit} style={{ display: "contents" }}>
+                  <label className="authField">
+                    <span>Email</span>
+                    <input type="email" value={authEmail} onChange={(e) => onEmailChange(e.target.value)} autoComplete="email" required />
+                  </label>
+                  <label className="authField">
+                    <span>Password</span>
+                    <input
+                      type="password"
+                      value={authPassword}
+                      onChange={(e) => onPasswordChange(e.target.value)}
+                      autoComplete="current-password"
+                      minLength={8}
+                      required
+                    />
+                  </label>
+                  <button className="authPrimaryButton compact" type="submit" disabled={authPending}>
+                    {authPending ? "Signing In..." : "Sign In"}
+                  </button>
+                </form>
+              ) : (
+                <form onSubmit={onSignupSubmit} style={{ display: "contents" }}>
+                  <label className="authField">
+                    <span>Email</span>
+                    <input type="email" value={authEmail} onChange={(e) => onEmailChange(e.target.value)} autoComplete="email" required />
+                  </label>
+                  <label className="authField">
+                    <span>Password</span>
+                    <input
+                      type="password"
+                      value={authPassword}
+                      onChange={(e) => onPasswordChange(e.target.value)}
+                      autoComplete="new-password"
+                      minLength={8}
+                      required
+                    />
+                  </label>
+                  <label className="authField">
+                    <span>Confirm Password</span>
+                    <input
+                      type="password"
+                      value={authConfirmPassword}
+                      onChange={(e) => onConfirmPasswordChange(e.target.value)}
+                      autoComplete="new-password"
+                      minLength={8}
+                      required
+                    />
+                  </label>
+                  <button className="authPrimaryButton compact" type="submit" disabled={authPending}>
+                    {authPending ? "Creating Account..." : "Create Account"}
+                  </button>
+                </form>
+              )}
+            </div>
           ) : null}
         </>
       )}
@@ -1222,8 +1292,9 @@ export default function App() {
   const [authUser, setAuthUser] = useState(null);
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
+  const [authConfirmPassword, setAuthConfirmPassword] = useState("");
   const [authPending, setAuthPending] = useState(false);
-  const [authMenuOpen, setAuthMenuOpen] = useState(false);
+  const [authMode, setAuthMode] = useState(null);
   const [savedArtistIds, setSavedArtistIds] = useState(() => {
     try {
       const stored = window.localStorage.getItem(MY_LIST_STORAGE_KEY);
@@ -1402,7 +1473,7 @@ export default function App() {
     }
   }
 
-  async function handleAuthSubmit(event) {
+  async function handleLoginSubmit(event) {
     event.preventDefault();
     setAuthPending(true);
     setError("");
@@ -1410,31 +1481,60 @@ export default function App() {
     try {
       const payload = await requestJson("/api/auth/login", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          email: authEmail,
-          password: authPassword,
-          guestUserId,
-        }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: authEmail, password: authPassword, guestUserId }),
       });
 
       setAuthUser(payload.user ?? null);
       setAuthPassword("");
-      setAuthMenuOpen(false);
+      setAuthMode(null);
     } catch (authError) {
-      setError(authError instanceof Error ? authError.message : "Unable to authenticate.");
+      setError(authError instanceof Error ? authError.message : "Unable to sign in.");
       setAuthPending(false);
       return;
     }
 
-    // Fetch the user's saved list after a successful login (separate error scope)
     try {
       const myListPayload = await requestJson("/api/my-list");
       setSavedArtistIds(Array.isArray(myListPayload.artistIds) ? myListPayload.artistIds : []);
     } catch {
       // Non-critical — user is signed in; list will reload on next page refresh.
+    } finally {
+      setAuthPending(false);
+    }
+  }
+
+  async function handleSignupSubmit(event) {
+    event.preventDefault();
+    if (authPassword !== authConfirmPassword) {
+      setError("Passwords do not match.");
+      return;
+    }
+    setAuthPending(true);
+    setError("");
+
+    try {
+      const payload = await requestJson("/api/auth/signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: authEmail, password: authPassword, guestUserId }),
+      });
+
+      setAuthUser(payload.user ?? null);
+      setAuthPassword("");
+      setAuthConfirmPassword("");
+      setAuthMode(null);
+    } catch (signupError) {
+      setError(signupError instanceof Error ? signupError.message : "Unable to create account.");
+      setAuthPending(false);
+      return;
+    }
+
+    try {
+      const myListPayload = await requestJson("/api/my-list");
+      setSavedArtistIds(Array.isArray(myListPayload.artistIds) ? myListPayload.artistIds : []);
+    } catch {
+      // Non-critical
     } finally {
       setAuthPending(false);
     }
@@ -1448,7 +1548,8 @@ export default function App() {
       await requestJson("/api/auth/logout", { method: "POST" });
       setAuthUser(null);
       setAuthPassword("");
-      setAuthMenuOpen(false);
+      setAuthConfirmPassword("");
+      setAuthMode(null);
       const guestListPayload = await requestJson(`/api/my-list?userId=${encodeURIComponent(guestUserId)}`);
       setSavedArtistIds(Array.isArray(guestListPayload.artistIds) ? guestListPayload.artistIds : []);
     } catch (logoutError) {
@@ -1506,12 +1607,15 @@ export default function App() {
           authUser={authUser}
           authEmail={authEmail}
           authPassword={authPassword}
+          authConfirmPassword={authConfirmPassword}
           authPending={authPending}
-          authMenuOpen={authMenuOpen}
-          onToggleMenu={() => setAuthMenuOpen((current) => !current)}
+          authMode={authMode}
+          onSetMode={setAuthMode}
           onEmailChange={setAuthEmail}
           onPasswordChange={setAuthPassword}
-          onSubmit={handleAuthSubmit}
+          onConfirmPasswordChange={setAuthConfirmPassword}
+          onLoginSubmit={handleLoginSubmit}
+          onSignupSubmit={handleSignupSubmit}
           onLogout={handleLogout}
         />
       </nav>
