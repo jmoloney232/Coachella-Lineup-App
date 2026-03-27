@@ -352,12 +352,15 @@ function buildSessionCookie(value, expiresAt) {
     `${SESSION_COOKIE_NAME}=${encodeURIComponent(value)}`,
     "Path=/",
     "HttpOnly",
-    "SameSite=Lax",
     `Expires=${new Date(expiresAt).toUTCString()}`,
   ];
 
   if (isProduction()) {
+    // SameSite=None + Secure required for cross-origin cookie sending (static site + API on separate Render services)
+    parts.push("SameSite=None");
     parts.push("Secure");
+  } else {
+    parts.push("SameSite=Lax");
   }
 
   return parts.join("; ");
@@ -368,12 +371,14 @@ function clearSessionCookie() {
     `${SESSION_COOKIE_NAME}=`,
     "Path=/",
     "HttpOnly",
-    "SameSite=Lax",
     `Expires=${new Date(0).toUTCString()}`,
   ];
 
   if (isProduction()) {
+    parts.push("SameSite=None");
     parts.push("Secure");
+  } else {
+    parts.push("SameSite=Lax");
   }
 
   return parts.join("; ");
