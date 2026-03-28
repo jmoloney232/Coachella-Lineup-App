@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { toPng } from "html-to-image";
 import {
   DAY_ORDER,
   DOLAB_ROW_PATTERNS,
@@ -126,6 +127,59 @@ function SaveActionButton({ isSaved, onToggleSave }) {
     <button className={`saveArtistButton ${isSaved ? "active" : ""}`} type="button" onClick={onToggleSave}>
       {isSaved ? "Remove from My List" : "Add to My List"}
     </button>
+  );
+}
+
+function StagesMenu({ activePage, onNavigate }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  const isActive = ["dolab", "quasar"].includes(activePage);
+
+  useEffect(() => {
+    function handler(e) {
+      if (!ref.current?.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  function navigate(page) {
+    setOpen(false);
+    onNavigate(page);
+  }
+
+  return (
+    <div className="stagesMenu" ref={ref}>
+      <button
+        className={`siteNavButton${isActive ? " active" : ""}`}
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+      >
+        Stages ▾
+      </button>
+      {open && (
+        <ul className="stagesDropdown">
+          <li>
+            <button
+              className={`stagesOption${activePage === "dolab" ? " active" : ""}`}
+              type="button"
+              onClick={() => navigate("dolab")}
+            >
+              Do LaB
+            </button>
+          </li>
+          <li>
+            <button
+              className={`stagesOption${activePage === "quasar" ? " active" : ""}`}
+              type="button"
+              onClick={() => navigate("quasar")}
+            >
+              Quasar
+            </button>
+          </li>
+        </ul>
+      )}
+    </div>
   );
 }
 
@@ -273,7 +327,7 @@ function CoachellaArtistPanel({ artist, artistLookup, onRelatedArtistSelect, isS
             </div>
             <div className="panelMeta">
               <SaveActionButton isSaved={isSaved} onToggleSave={onToggleSave} />
-              {artist.spotify_url ? (
+              {artist.spotify_url?.startsWith("https://open.spotify.com/") ? (
                 <a href={artist.spotify_url} target="_blank" rel="noreferrer">
                   Open Spotify
                 </a>
@@ -353,7 +407,7 @@ function DoLabArtistPanel({ artist, isSaved, onToggleSave, onAddSong, isSongInPl
           label="Popular Songs"
           tracks={artist.popularSongsList}
           compact
-          onAddSong={onAddSong ? (songName) => onAddSong({ songName, artistName: artist.artist, artistId: artist.id, day: artist.day, type: "popular" }) : undefined}
+          onAddSong={onAddSong ? (songName) => onAddSong({ songName, artistName: artist.artist, artistId: artist.id, day: "Do LaB", type: "popular" }) : undefined}
           isInPlaylist={isSongInPlaylist ? (songName) => isSongInPlaylist(artist.id, songName) : undefined}
         />
       </div>
@@ -379,7 +433,7 @@ function GenericArtistPanel({ artist, eyebrow, isSaved, onToggleSave, onAddSong,
             </div>
             <div className="panelMeta">
               <SaveActionButton isSaved={isSaved} onToggleSave={onToggleSave} />
-              {artist.spotify_url ? (
+              {artist.spotify_url?.startsWith("https://open.spotify.com/") ? (
                 <a href={artist.spotify_url} target="_blank" rel="noreferrer">
                   Open Spotify
                 </a>
@@ -392,7 +446,7 @@ function GenericArtistPanel({ artist, eyebrow, isSaved, onToggleSave, onAddSong,
               label="Popular Songs"
               tracks={artist.popularSongsList ?? artist.songsList ?? []}
               compact
-              onAddSong={onAddSong ? (songName) => onAddSong({ songName, artistName: artist.artist, artistId: artist.id, day: artist.day, type: "popular" }) : undefined}
+              onAddSong={onAddSong ? (songName) => onAddSong({ songName, artistName: artist.artist, artistId: artist.id, day: artist.day ?? (artist.festival === "dolab" ? "Do LaB" : ""), type: "popular" }) : undefined}
               isInPlaylist={isSongInPlaylist ? (songName) => isSongInPlaylist(artist.id, songName) : undefined}
             />
           </div>
@@ -790,6 +844,8 @@ function SavedDoLabSection({ artists, selectedArtistId, onSelect, onAddSong, isS
 }
 
 function MyListPage({ coachellaArtists, dolabArtists, quasarArtists, selectedArtistIds, onToggleArtist, selectedArtistId, onSelect, onAddSong, isSongInPlaylist }) {
+  const mainRef = useRef(null);
+  const [downloading, setDownloading] = useState(false);
   const selectedIds = useMemo(() => new Set(selectedArtistIds), [selectedArtistIds]);
   const selectedCoachella = useMemo(
     () => coachellaArtists.filter((artist) => selectedIds.has(artist.id)),
@@ -822,13 +878,102 @@ function MyListPage({ coachellaArtists, dolabArtists, quasarArtists, selectedArt
     [selectedCoachella, selectedQuasar],
   );
 
+  const allArtistsLookup = useMemo(() => {
+    const all = [...coachellaArtists, ...dolabArtists, ...quasarArtists];
+    const map = new Map();
+    all.forEach((a) => map.set(normalizeLookupValue(a.artist), a));
+    all.forEach((a) => {
+      (a.relatedArtistsList ?? []).forEach((name) => {
+        const key = normalizeLookupValue(name);
+        if (map.has(key)) return;
+        const match = all.find((c) => {
+          const cn = normalizeLookupValue(c.artist);
+          return cn.startsWith(key) || key.startsWith(cn) || cn.includes(key);
+        });
+        if (match) map.set(key, match);
+      });
+    });
+    return map;
+  }, [coachellaArtists, dolabArtists, quasarArtists]);
+
+  const perDayRankMap = useMemo(() => {
+    const m = new Map();
+    for (const day of DAY_ORDER) {
+      [...coachellaArtists, ...quasarArtists]
+        .filter((a) => a.day === day)
+        .forEach((a, i) => m.set(a.id, i));
+    }
+    return m;
+  }, [coachellaArtists, quasarArtists]);
+
+  const suggestions = useMemo(() => {
+    if (!selectedArtistIds.length) return [];
+    const savedSet = new Set(selectedArtistIds);
+    const all = [...coachellaArtists, ...dolabArtists, ...quasarArtists];
+    const savedArtists = all.filter((a) => savedSet.has(a.id));
+    const savedGenres = new Set(
+      savedArtists.map((a) => normalizeLookupValue(a.genre ?? "")).filter(Boolean),
+    );
+    const scores = new Map();
+
+    for (const saved of savedArtists) {
+      for (const name of (saved.relatedArtistsList ?? [])) {
+        const match = allArtistsLookup.get(normalizeLookupValue(name));
+        if (!match || savedSet.has(match.id)) continue;
+        const e = scores.get(match.id) ?? { artist: match, related: 0, genre: 0 };
+        e.related++;
+        scores.set(match.id, e);
+      }
+    }
+    for (const candidate of all) {
+      if (savedSet.has(candidate.id)) continue;
+      const g = normalizeLookupValue(candidate.genre ?? "");
+      if (g && savedGenres.has(g)) {
+        const e = scores.get(candidate.id) ?? { artist: candidate, related: 0, genre: 0 };
+        e.genre++;
+        scores.set(candidate.id, e);
+      }
+    }
+
+    return [...scores.values()]
+      .sort((a, b) => {
+        const diff = (b.related * 2 + b.genre) - (a.related * 2 + a.genre);
+        if (diff !== 0) return diff;
+        return (perDayRankMap.get(a.artist.id) ?? a.artist.lineupRank ?? 999)
+             - (perDayRankMap.get(b.artist.id) ?? b.artist.lineupRank ?? 999);
+      })
+      .slice(0, 8);
+  }, [selectedArtistIds, coachellaArtists, dolabArtists, quasarArtists, allArtistsLookup, perDayRankMap]);
+
+  async function handleDownload() {
+    if (!mainRef.current) return;
+    setDownloading(true);
+    try {
+      const dataUrl = await toPng(mainRef.current, {
+        filter: (node) => !node.classList?.contains("noCapture"),
+        pixelRatio: 2,
+        style: {
+          background:
+            "radial-gradient(circle at 82% 14%, rgba(255,255,255,0.24), transparent 8%), " +
+            "linear-gradient(180deg, #0f7085 0%, #135f5f 52%, #291302 100%)",
+        },
+      });
+      const link = document.createElement("a");
+      link.download = "my-coachella-lineup.png";
+      link.href = dataUrl;
+      link.click();
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   return (
-    <main className="posterShell myListShell">
+    <main className="posterShell myListShell" ref={mainRef}>
       <div className="skyGlow" />
       <div className="horizon" />
       <header className="posterHeader myListHeader">
         <p>GOLDENVOICE PRESENTS IN INDIO</p>
-        <h1>MY LIST</h1>
+        <h1>MY LINEUP</h1>
         <h2>PERSONAL COACHELLA LINEUP</h2>
         <div className="locationRow">
           <span>INDIO</span>
@@ -836,6 +981,14 @@ function MyListPage({ coachellaArtists, dolabArtists, quasarArtists, selectedArt
           <span>EMPIRE POLO CLUB</span>
         </div>
         <p className="instruction">Artists keep their original lineup priority. Quasar and Do LaB appear after main lineup picks.</p>
+        <button
+          className="downloadButton noCapture"
+          type="button"
+          onClick={handleDownload}
+          disabled={downloading}
+        >
+          {downloading ? "Generating…" : "Download Image"}
+        </button>
       </header>
 
       <section className="posterBody myListBody">
@@ -885,6 +1038,29 @@ function MyListPage({ coachellaArtists, dolabArtists, quasarArtists, selectedArt
           </>
         )}
       </section>
+
+      {suggestions.length > 0 && (
+        <section className="suggestionsShell noCapture">
+          <h2 className="suggestionsTitle">Suggested for You</h2>
+          <div className="suggestionsList">
+            {suggestions.map(({ artist }) => (
+              <div key={artist.id} className="suggestionCard">
+                <div className="suggestionInfo">
+                  <span className="suggestionName">{artist.artist}</span>
+                  {artist.genre ? <span className="suggestionGenre">{artist.genre}</span> : null}
+                </div>
+                <button
+                  className="suggestionAddButton"
+                  type="button"
+                  onClick={() => onToggleArtist(artist.id)}
+                >
+                  +
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
     </main>
   );
 }
@@ -1161,6 +1337,9 @@ function SchedulePage({
           </button>
         ))}
       </nav>
+      <p className="scheduleDisclaimer">
+        Set times have not been officially announced — times shown are estimates. We'll keep updating this page as official information becomes available.
+      </p>
       {artistPanel}
       <ScheduleGrid
         sets={sets}
@@ -1251,11 +1430,15 @@ function getOrCreateGuestUserId() {
       return existing;
     }
 
-    const nextId = `guest_${Math.random().toString(36).slice(2, 12)}`;
+    const array = new Uint32Array(3);
+    crypto.getRandomValues(array);
+    const nextId = `guest_${Array.from(array).map((n) => n.toString(36)).join("")}`;
     window.localStorage.setItem(USER_ID_STORAGE_KEY, nextId);
     return nextId;
   } catch {
-    return `guest_${Math.random().toString(36).slice(2, 12)}`;
+    const array = new Uint32Array(3);
+    crypto.getRandomValues(array);
+    return `guest_${Array.from(array).map((n) => n.toString(36)).join("")}`;
   }
 }
 
@@ -1268,7 +1451,9 @@ async function requestJson(url, options = {}) {
 
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(payload.error || "Request failed.");
+    const err = new Error(payload.error || "Request failed.");
+    err.status = response.status;
+    throw err;
   }
 
   return payload;
@@ -1313,6 +1498,9 @@ export default function App() {
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [pendingScrollId, setPendingScrollId] = useState(null);
+  const searchContainerRef = useRef(null);
 
   useEffect(() => {
     function syncPageFromHash() {
@@ -1324,12 +1512,62 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    setSearchQuery("");
+  }, [activePage]);
+
+  useEffect(() => {
     window.localStorage.setItem(MY_LIST_STORAGE_KEY, JSON.stringify(savedArtistIds));
   }, [savedArtistIds]);
 
   useEffect(() => {
     window.localStorage.setItem(PLAYLIST_STORAGE_KEY, JSON.stringify(playlistSongs));
   }, [playlistSongs]);
+
+  const searchResults = useMemo(() => {
+    const q = normalizeLookupValue(searchQuery);
+    if (!q) return [];
+
+    // lineupRank is a flat CSV index (Friday→Saturday→Sunday), so a small Friday
+    // act has a lower rank than the Sunday headliner. Recompute rank within each
+    // day so all headliners are rank 0 regardless of day.
+    const perDayRank = new Map();
+    for (const day of DAY_ORDER) {
+      [...coachellaArtists, ...quasarArtists]
+        .filter((a) => a.day === day)
+        .forEach((a, i) => perDayRank.set(a.id, i));
+    }
+    function effectiveRank(a) {
+      return perDayRank.has(a.id) ? perDayRank.get(a.id) : (a.lineupRank ?? Infinity);
+    }
+
+    return [
+      ...coachellaArtists,
+      ...dolabArtists,
+      ...quasarArtists,
+    ]
+      .filter((a) => normalizeLookupValue(a.artist).includes(q) || normalizeLookupValue(a.genre ?? "").includes(q))
+      .sort((a, b) => effectiveRank(a) - effectiveRank(b))
+      .slice(0, 10);
+  }, [searchQuery, coachellaArtists, dolabArtists, quasarArtists]);
+
+  useEffect(() => {
+    if (!pendingScrollId) return;
+    document.getElementById(`artist-${pendingScrollId}`)?.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+    });
+    setPendingScrollId(null);
+  }, [pendingScrollId]);
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (!searchContainerRef.current?.contains(e.target)) {
+        setSearchQuery("");
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -1435,13 +1673,32 @@ export default function App() {
       setSavedArtistIds(currentArtistIds);
       // If logged in but the server doesn't recognize the session, clear auth state
       // so the user gets a clear prompt to sign in again instead of a cryptic error.
-      if (authUser && saveError instanceof Error && saveError.message === "A valid guest userId is required.") {
+      if (authUser && saveError instanceof Error && saveError.status === 400) {
         setAuthUser(null);
         setError("Your session has expired. Please sign in again.");
       } else {
         setError(saveError instanceof Error ? saveError.message : "Unable to save your list.");
       }
     }
+  }
+
+  function handleSearchSelect(artist) {
+    setSearchQuery("");
+    if (artist.festival === "coachella") {
+      window.location.hash = "coachella";
+      setActivePage("coachella");
+      setSelectedCoachellaArtistId(artist.id);
+    } else if (artist.festival === "dolab") {
+      window.location.hash = "dolab";
+      setActivePage("dolab");
+      setSelectedDolabArtistId(artist.id);
+    } else if (artist.festival === "quasar") {
+      window.location.hash = "quasar";
+      setActivePage("quasar");
+      setActiveQuasarWeekend(artist.weekend);
+      setSelectedQuasarArtistId(artist.id);
+    }
+    setPendingScrollId(artist.id);
   }
 
   function isSongInPlaylist(artistId, songName) {
@@ -1547,6 +1804,7 @@ export default function App() {
     try {
       await requestJson("/api/auth/logout", { method: "POST" });
       setAuthUser(null);
+      setAuthEmail("");
       setAuthPassword("");
       setAuthConfirmPassword("");
       setAuthMode(null);
@@ -1570,21 +1828,16 @@ export default function App() {
           window.location.hash = "coachella";
           setActivePage("coachella");
         }}>
-          Main Lineup
+          Lineup
         </button>
-        <button className={`siteNavButton ${activePage === "dolab" ? "active" : ""}`} type="button" onClick={() => {
-          window.location.hash = "dolab";
-          setActivePage("dolab");
-        }}>
-          Do LaB
-        </button>
-        <button className={`siteNavButton ${activePage === "quasar" ? "active" : ""}`} type="button" onClick={() => {
-          window.location.hash = "quasar";
-          setActivePage("quasar");
-          setActiveQuasarWeekend("weekend1");
-        }}>
-          Quasar
-        </button>
+        <StagesMenu
+          activePage={activePage}
+          onNavigate={(page) => {
+            window.location.hash = page;
+            setActivePage(page);
+            if (page === "quasar") setActiveQuasarWeekend("weekend1");
+          }}
+        />
         <button className={`siteNavButton ${activePage === "my-list" ? "active" : ""}`} type="button" onClick={() => {
           window.location.hash = "my-list";
           setActivePage("my-list");
@@ -1603,6 +1856,44 @@ export default function App() {
         }}>
           Playlist
         </button>
+        <div className="searchBar" ref={searchContainerRef}>
+          <input
+            className="searchInput"
+            type="search"
+            placeholder="Search artists..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            autoComplete="off"
+          />
+          {searchResults.length > 0 && (
+            <ul className="searchDropdown">
+              {searchResults.map((artist) => (
+                <li key={artist.id}>
+                  <button
+                    className="searchResultButton"
+                    type="button"
+                    onClick={() => handleSearchSelect(artist)}
+                  >
+                    <span className="searchResultName">
+                      {artist.artist}
+                      {artist.genre ? <span className="searchResultGenre">{artist.genre}</span> : null}
+                    </span>
+                    <span className="searchResultMeta">
+                      {savedArtistIds.includes(artist.id) && (
+                        <span className="searchResultSaved">✓</span>
+                      )}
+                      {artist.festival === "coachella"
+                        ? artist.day
+                        : artist.festival === "dolab"
+                        ? "Do LaB"
+                        : "Quasar"}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
         <AuthMenu
           authUser={authUser}
           authEmail={authEmail}

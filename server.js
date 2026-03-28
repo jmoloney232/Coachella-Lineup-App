@@ -18,6 +18,7 @@ const savedListsFile = path.join(dataDir, "saved-lists.json");
 const authFile = path.join(dataDir, "auth.json");
 const PORT = Number(process.env.PORT ?? 3001);
 const SESSION_COOKIE_NAME = "coachella_session";
+const GUEST_COOKIE_NAME = "coachella_guest";
 const SESSION_DURATION_MS = 1000 * 60 * 60 * 24 * 30;
 const SESSION_CLEANUP_INTERVAL_MS = 1000 * 60 * 15;
 const AUTH_RATE_LIMIT_WINDOW_MS = Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS ?? 1000 * 60 * 15);
@@ -140,9 +141,7 @@ function getPool() {
 
   pool = new Pool({
     connectionString,
-    ssl: {
-      rejectUnauthorized: false,
-    },
+    ssl: isProduction() ? { rejectUnauthorized: true } : false,
   });
 
   return pool;
@@ -289,6 +288,15 @@ async function loadLineupData() {
   return cachedData;
 }
 
+function getSecurityHeaders() {
+  return {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    ...(isProduction() ? { "Strict-Transport-Security": "max-age=31536000; includeSubDomains" } : {}),
+  };
+}
+
 function sendJson(request, response, statusCode, payload, headers = {}) {
   const allowedOrigin = getAllowedOrigin(request);
   response.writeHead(statusCode, {
@@ -303,6 +311,7 @@ function sendJson(request, response, statusCode, payload, headers = {}) {
     "Access-Control-Allow-Headers": "Content-Type",
     "Content-Type": "application/json; charset=utf-8",
     "Cache-Control": "no-store",
+    ...getSecurityHeaders(),
     ...headers,
   });
   response.end(JSON.stringify(payload));
@@ -366,6 +375,39 @@ function buildSessionCookie(value, expiresAt) {
   return parts.join("; ");
 }
 
+function buildGuestCookie(guestId) {
+  const parts = [
+    `${GUEST_COOKIE_NAME}=${encodeURIComponent(guestId)}`,
+    "Path=/",
+    "HttpOnly",
+    `Max-Age=${Math.floor(SESSION_DURATION_MS / 1000)}`,
+  ];
+
+  if (isProduction()) {
+    parts.push("SameSite=None");
+    parts.push("Secure");
+  } else {
+    parts.push("SameSite=Lax");
+  }
+
+  return parts.join("; ");
+}
+
+// Returns the authoritative guest owner ID for this browser session.
+// If the browser already has a bound guest cookie, use it (ignores the URL param).
+// If not, accepts the requested ID and issues a new cookie to bind it.
+function resolveGuestOwner(request, requestedId) {
+  const cookies = parseCookies(request);
+  const cookieId = cookies[GUEST_COOKIE_NAME];
+  if (typeof cookieId === "string" && validateGuestUserId(cookieId)) {
+    return { ownerId: cookieId, newCookie: null };
+  }
+  if (validateGuestUserId(requestedId)) {
+    return { ownerId: requestedId, newCookie: buildGuestCookie(requestedId) };
+  }
+  return { ownerId: null, newCookie: null };
+}
+
 function clearSessionCookie() {
   const parts = [
     `${SESSION_COOKIE_NAME}=`,
@@ -400,8 +442,10 @@ function hashToken(token) {
   return createHash("sha256").update(token).digest("hex");
 }
 
+const SCRYPT_PARAMS = { N: 16384, r: 8, p: 1 };
+
 async function hashPassword(password, salt = randomBytes(16).toString("hex")) {
-  const derivedKey = await scrypt(password, salt, 64);
+  const derivedKey = await scrypt(password, salt, 64, SCRYPT_PARAMS);
   return {
     salt,
     hash: Buffer.from(derivedKey).toString("hex"),
@@ -409,9 +453,11 @@ async function hashPassword(password, salt = randomBytes(16).toString("hex")) {
 }
 
 async function verifyPassword(password, salt, expectedHash) {
-  const derivedKey = await scrypt(password, salt, 64);
-  const actualHash = Buffer.from(derivedKey).toString("hex");
-  return actualHash === expectedHash;
+  const derivedKey = await scrypt(password, salt, 64, SCRYPT_PARAMS);
+  const actualHash = Buffer.from(derivedKey);
+  const storedHash = Buffer.from(expectedHash, "hex");
+  if (actualHash.length !== storedHash.length) return false;
+  return crypto.timingSafeEqual(actualHash, storedHash);
 }
 
 async function getSavedArtistIds(ownerId) {
@@ -607,9 +653,11 @@ async function getAuthenticatedUser(request) {
 }
 
 function getClientIp(request) {
-  const forwardedFor = request.headers["x-forwarded-for"];
-  if (typeof forwardedFor === "string" && forwardedFor.trim()) {
-    return forwardedFor.split(",")[0].trim();
+  if (process.env.TRUST_PROXY === "true") {
+    const forwardedFor = request.headers["x-forwarded-for"];
+    if (typeof forwardedFor === "string" && forwardedFor.trim()) {
+      return forwardedFor.split(",")[0].trim();
+    }
   }
 
   return request.socket.remoteAddress ?? "unknown";
@@ -886,11 +934,18 @@ const server = createServer(async (request, response) => {
     }
 
     if (url.pathname === "/api/my-list") {
-      const ownerId = authenticatedUser?.id ?? (url.searchParams.get("userId") ?? "");
-
-      if (!authenticatedUser && !validateGuestUserId(ownerId)) {
-        sendJson(request, response, 400, { error: "A valid guest userId is required." });
-        return;
+      let ownerId, guestCookie;
+      if (authenticatedUser) {
+        ownerId = authenticatedUser.id;
+        guestCookie = null;
+      } else {
+        const resolved = resolveGuestOwner(request, url.searchParams.get("userId") ?? "");
+        if (!resolved.ownerId) {
+          sendJson(request, response, 400, { error: "A valid guest userId is required." });
+          return;
+        }
+        ownerId = resolved.ownerId;
+        guestCookie = resolved.newCookie;
       }
 
       if (request.method === "GET") {
@@ -900,7 +955,7 @@ const server = createServer(async (request, response) => {
           artistIds,
           count: artistIds.length,
           isAuthenticated: Boolean(authenticatedUser),
-        });
+        }, guestCookie ? { "Set-Cookie": guestCookie } : {});
         return;
       }
 
@@ -910,6 +965,10 @@ const server = createServer(async (request, response) => {
       const artistIds = Array.isArray(body.artistIds) ? body.artistIds : null;
       if (!artistIds) {
         sendJson(request, response, 400, { error: "artistIds must be an array." });
+        return;
+      }
+      if (artistIds.length > 500) {
+        sendJson(request, response, 400, { error: "artistIds array exceeds maximum length of 500." });
         return;
       }
 
@@ -922,7 +981,7 @@ const server = createServer(async (request, response) => {
         artistIds: nextArtistIds,
         count: nextArtistIds.length,
         isAuthenticated: Boolean(authenticatedUser),
-      });
+      }, guestCookie ? { "Set-Cookie": guestCookie } : {});
       return;
     }
 
@@ -964,16 +1023,23 @@ const server = createServer(async (request, response) => {
     }
 
     if (url.pathname === "/api/playlist") {
-      const ownerId = authenticatedUser?.id ?? (url.searchParams.get("userId") ?? "");
-
-      if (!authenticatedUser && !validateGuestUserId(ownerId)) {
-        sendJson(request, response, 400, { error: "A valid guest userId is required." });
-        return;
+      let ownerId, guestCookie;
+      if (authenticatedUser) {
+        ownerId = authenticatedUser.id;
+        guestCookie = null;
+      } else {
+        const resolved = resolveGuestOwner(request, url.searchParams.get("userId") ?? "");
+        if (!resolved.ownerId) {
+          sendJson(request, response, 400, { error: "A valid guest userId is required." });
+          return;
+        }
+        ownerId = resolved.ownerId;
+        guestCookie = resolved.newCookie;
       }
 
       if (request.method === "GET") {
         const songs = await getPlaylistSongs(ownerId);
-        sendJson(request, response, 200, { ownerId, songs, count: songs.length });
+        sendJson(request, response, 200, { ownerId, songs, count: songs.length }, guestCookie ? { "Set-Cookie": guestCookie } : {});
         return;
       }
 
@@ -985,25 +1051,40 @@ const server = createServer(async (request, response) => {
         sendJson(request, response, 400, { error: "songs must be an array." });
         return;
       }
+      if (songs.length > 2000) {
+        sendJson(request, response, 400, { error: "songs array exceeds maximum length of 2000." });
+        return;
+      }
 
       const nextSongs = await updatePlaylistSongs(ownerId, songs);
-      sendJson(request, response, 200, { ownerId, songs: nextSongs, count: nextSongs.length });
+      sendJson(request, response, 200, { ownerId, songs: nextSongs, count: nextSongs.length }, guestCookie ? { "Set-Cookie": guestCookie } : {});
       return;
     }
 
     if (url.pathname === "/api/playlist/export.csv") {
-      const ownerId = authenticatedUser?.id ?? (url.searchParams.get("userId") ?? "");
-
-      if (!authenticatedUser && !validateGuestUserId(ownerId)) {
-        sendJson(request, response, 400, { error: "A valid guest userId is required." });
-        return;
+      let ownerId, guestCookie;
+      if (authenticatedUser) {
+        ownerId = authenticatedUser.id;
+        guestCookie = null;
+      } else {
+        const resolved = resolveGuestOwner(request, url.searchParams.get("userId") ?? "");
+        if (!resolved.ownerId) {
+          sendJson(request, response, 400, { error: "A valid guest userId is required." });
+          return;
+        }
+        ownerId = resolved.ownerId;
+        guestCookie = resolved.newCookie;
       }
 
       const songs = await getPlaylistSongs(ownerId);
       const csvRows = ["song_name,artist,day"];
       for (const song of songs) {
         const row = [song.songName, song.artistName, song.day]
-          .map((field) => `"${String(field ?? "").replace(/"/g, '""')}"`)
+          .map((field) => {
+            const str = String(field ?? "");
+            const safe = /^[=+\-@\t\r]/.test(str) ? `'${str}` : str;
+            return `"${safe.replace(/"/g, '""')}"`;
+          })
           .join(",");
         csvRows.push(row);
       }
@@ -1016,6 +1097,8 @@ const server = createServer(async (request, response) => {
         "Content-Type": "text/csv; charset=utf-8",
         "Content-Disposition": 'attachment; filename="coachella-playlist.csv"',
         "Cache-Control": "no-store",
+        ...getSecurityHeaders(),
+        ...(guestCookie ? { "Set-Cookie": guestCookie } : {}),
       });
       response.end(csvRows.join("\n"));
       return;
@@ -1058,6 +1141,7 @@ const server = createServer(async (request, response) => {
       response.writeHead(200, {
         "Content-Type": contentType,
         "Cache-Control": isImmutable ? "public, max-age=31536000, immutable" : "no-cache",
+        ...getSecurityHeaders(),
       });
       createReadStream(fp).pipe(response);
       return true;

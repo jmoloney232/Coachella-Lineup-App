@@ -97,6 +97,52 @@ a {
   transform: translateY(-1px);
 }
 
+.stagesMenu {
+  position: relative;
+  display: flex;
+}
+
+.stagesDropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 160px;
+  list-style: none;
+  margin: 0;
+  padding: 6px 0;
+  background: rgba(10, 22, 30, 0.96);
+  border: 1px solid rgba(255, 205, 117, 0.18);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  z-index: 50;
+}
+
+.stagesOption {
+  display: block;
+  width: 100%;
+  padding: 9px 16px;
+  border: none;
+  background: transparent;
+  color: rgba(243, 233, 213, 0.78);
+  font: inherit;
+  font-size: 0.875rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.stagesOption:hover,
+.stagesOption:focus-visible {
+  background: rgba(255, 205, 117, 0.08);
+  color: var(--accent-cream);
+  outline: none;
+}
+
+.stagesOption.active {
+  color: #fffdf4;
+  background: rgba(255, 205, 117, 0.1);
+}
+
 .authMenu {
   position: relative;
   margin-left: auto;
@@ -1069,6 +1115,112 @@ a {
   padding-bottom: 170px;
 }
 
+/* ── Download Button ─────────────────────────────────────── */
+
+.downloadButton {
+  margin-top: 14px;
+  padding: 10px 22px;
+  border: 1px solid rgba(255, 205, 117, 0.5);
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(255, 205, 117, 0.9);
+  font: inherit;
+  font-size: 0.85rem;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+
+.downloadButton:hover:not(:disabled),
+.downloadButton:focus-visible:not(:disabled) {
+  background: rgba(255, 205, 117, 0.1);
+  border-color: rgba(255, 205, 117, 0.9);
+  color: #fffdf4;
+  outline: none;
+}
+
+.downloadButton:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ── Suggestions ─────────────────────────────────────────── */
+
+.suggestionsShell {
+  max-width: 860px;
+  margin: 32px auto 0;
+  padding: 0 24px 40px;
+}
+
+.suggestionsTitle {
+  margin: 0 0 14px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(255, 205, 117, 0.6);
+}
+
+.suggestionsList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.suggestionCard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  background: rgba(5, 13, 18, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+}
+
+.suggestionInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.suggestionName {
+  color: var(--accent-cream);
+  font-size: 0.9rem;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.suggestionGenre {
+  color: rgba(243, 233, 213, 0.45);
+  font-size: 0.75rem;
+}
+
+.suggestionAddButton {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border: 1px solid rgba(255, 205, 117, 0.4);
+  border-radius: 50%;
+  background: transparent;
+  color: rgba(255, 205, 117, 0.8);
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+
+.suggestionAddButton:hover,
+.suggestionAddButton:focus-visible {
+  background: rgba(255, 205, 117, 0.12);
+  border-color: rgba(255, 205, 117, 0.8);
+  color: #fffdf4;
+  outline: none;
+}
+
 .myListHeader {
   margin-bottom: 24px;
 }
@@ -1335,6 +1487,110 @@ a {
   .savedSectionHeader {
     flex-direction: column;
     align-items: flex-start;
+  }
+}
+
+/* ── Search Bar ─────────────────────────────────────────── */
+
+.searchBar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1;
+  max-width: 220px;
+}
+
+.searchInput {
+  width: 100%;
+  padding: 8px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  background: rgba(5, 13, 18, 0.38);
+  color: var(--accent-cream);
+  font: inherit;
+  font-size: 0.875rem;
+  outline: none;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.searchInput::placeholder {
+  color: rgba(243, 233, 213, 0.4);
+}
+
+.searchInput:focus {
+  border-color: rgba(255, 205, 117, 0.5);
+  box-shadow: 0 0 0 1px rgba(255, 205, 117, 0.18);
+}
+
+/* hide the default browser clear (×) button */
+.searchInput::-webkit-search-cancel-button {
+  display: none;
+}
+
+.searchDropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  width: min(320px, calc(100vw - 32px));
+  list-style: none;
+  margin: 0;
+  padding: 6px 0;
+  background: rgba(10, 22, 30, 0.96);
+  border: 1px solid rgba(255, 205, 117, 0.18);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.searchResultButton {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 9px 16px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  transition: background 120ms ease;
+}
+
+.searchResultButton:hover,
+.searchResultButton:focus-visible {
+  background: rgba(255, 205, 117, 0.08);
+  outline: none;
+}
+
+.searchResultName {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--accent-cream);
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.searchResultGenre {
+  color: rgba(243, 233, 213, 0.45);
+  font-size: 0.72rem;
+  font-weight: 400;
+}
+
+.searchResultMeta {
+  color: rgba(255, 205, 117, 0.6);
+  font-size: 0.75rem;
+  white-space: nowrap;
+  margin-left: 12px;
+}
+
+.searchResultSaved {
+  margin-right: 4px;
+  color: rgba(255, 205, 117, 0.9);
+}
+
+@media (max-width: 820px) {
+  .searchBar {
+    max-width: 100%;
   }
 }
 
@@ -1649,6 +1905,18 @@ a {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.scheduleDisclaimer {
+  margin: 0 16px 12px;
+  padding: 10px 14px;
+  border: 1px solid rgba(255, 205, 117, 0.2);
+  border-radius: 8px;
+  background: rgba(255, 205, 117, 0.06);
+  color: rgba(243, 233, 213, 0.6);
+  font-size: 0.8rem;
+  line-height: 1.5;
+  text-align: center;
 }
 
 .scheduleEmpty {
