@@ -1,4 +1,4 @@
-import { createHash, randomBytes, randomUUID, scrypt as scryptCallback } from "node:crypto";
+import { createHash, randomBytes, randomUUID, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import { createReadStream } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
@@ -457,7 +457,7 @@ async function verifyPassword(password, salt, expectedHash) {
   const actualHash = Buffer.from(derivedKey);
   const storedHash = Buffer.from(expectedHash, "hex");
   if (actualHash.length !== storedHash.length) return false;
-  return crypto.timingSafeEqual(actualHash, storedHash);
+  return timingSafeEqual(actualHash, storedHash);
 }
 
 async function getSavedArtistIds(ownerId) {
