@@ -1808,8 +1808,8 @@ export default function App() {
       setAuthPassword("");
       setAuthConfirmPassword("");
       setAuthMode(null);
-      const guestListPayload = await requestJson(`/api/my-list?userId=${encodeURIComponent(guestUserId)}`);
-      setSavedArtistIds(Array.isArray(guestListPayload.artistIds) ? guestListPayload.artistIds : []);
+      setSavedArtistIds([]);
+      setPlaylistSongs([]);
     } catch (logoutError) {
       setError(logoutError instanceof Error ? logoutError.message : "Unable to log out.");
     } finally {
