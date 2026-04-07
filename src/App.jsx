@@ -1083,7 +1083,7 @@ function ScheduleGrid({ sets, activeDay, activeWeekend, normalizedLookup, quasar
 
   const byStage = {};
   STAGE_ORDER.forEach((stage) => {
-    byStage[stage] = daySets.filter((s) => s.stage === stage);
+    byStage[stage] = daySets.filter((s) => s.stage === stage).sort((a, b) => a.startMinutes - b.startMinutes);
   });
   const activeStages = STAGE_ORDER.filter((stage) => byStage[stage].length > 0);
 
@@ -1161,13 +1161,14 @@ function ScheduleGrid({ sets, activeDay, activeWeekend, normalizedLookup, quasar
                 const topPx = (dayMax - set.endMinutes) * PX_PER_MIN;
                 const heightPx = Math.max((set.endMinutes - set.startMinutes) * PX_PER_MIN - 2, 20);
 
+                const isQuasarHeadlinerSlot = stage === "Quasar" && i === byStage[stage].length - 1;
                 const effectiveArtist =
                   stage === "Quasar" && activeWeekend === "weekend2"
-                    ? quasarW2ByDay.get(activeDay) ?? null
+                    ? (isQuasarHeadlinerSlot ? quasarW2ByDay.get(activeDay) ?? null : null)
                     : normalizedLookup.get(normalizeLookupValue(set.artist)) ?? null;
 
                 const displayName =
-                  stage === "Quasar" && activeWeekend === "weekend2" && effectiveArtist
+                  isQuasarHeadlinerSlot && activeWeekend === "weekend2" && effectiveArtist
                     ? effectiveArtist.artist
                     : set.artist;
 
@@ -1185,7 +1186,7 @@ function ScheduleGrid({ sets, activeDay, activeWeekend, normalizedLookup, quasar
                       onClick={(e) => onSelectArtist(effectiveArtist.id, e.currentTarget.getBoundingClientRect())}
                     >
                       <span className="scheduleBlockName">{displayName}</span>
-                      <span className="scheduleBlockTime">• {set.startTime}</span>
+                      <span className="scheduleBlockTime">{set.startTime}</span>
                     </button>
                   );
                 }
@@ -1196,7 +1197,7 @@ function ScheduleGrid({ sets, activeDay, activeWeekend, normalizedLookup, quasar
                     style={{ top: topPx, height: heightPx }}
                   >
                     <span className="scheduleBlockName">{displayName}</span>
-                    <span className="scheduleBlockTime">• {set.startTime}</span>
+                    <span className="scheduleBlockTime">{set.startTime}</span>
                   </div>
                 );
               })}
